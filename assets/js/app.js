@@ -407,6 +407,99 @@ function toggleSidebar() {
     document.querySelector('.ide').classList.toggle('sidebar-collapsed');
 }
 
+// ─── SPA Router ──────────────────────────────────────────────────────────
+// Intercepts [data-spa] link clicks, fetches the full page, swaps only
+// the .workspace div. Sidebar tree and toolbar stay intact.
+
+(function() {
+    // Intercept clicks on [data-spa] links AND internal content links
+    document.addEventListener('click', function(e) {
+        var link = e.target.closest('a[href]');
+        if (!link) return;
+        if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+
+        var href = link.getAttribute('href');
+        if (!href || href.startsWith('http') || href.startsWith('#') || href.startsWith('javascript')) return;
+
+        // Skip links with htmx attributes (they handle their own swapping)
+        if (link.hasAttribute('hx-get') || link.hasAttribute('hx-post')) return;
+
+        // Skip download links
+        if (link.hasAttribute('download') || href.endsWith('/export')) return;
+
+        e.preventDefault();
+        e.stopPropagation();
+        spaNavigate(href);
+    });
+
+    // Browser back/forward
+    window.addEventListener('popstate', function() {
+        spaNavigate(window.location.pathname, true);
+    });
+
+    function spaNavigate(url, skipPush) {
+        var workspace = document.querySelector('.workspace');
+        if (!workspace) { window.location = url; return; }
+
+        // Visual loading feedback
+        workspace.style.opacity = '0.5';
+        workspace.style.pointerEvents = 'none';
+
+        fetch(url, { headers: { 'X-SPA': '1' } })
+            .then(function(r) {
+                if (!r.ok) throw new Error(r.status);
+                return r.text();
+            })
+            .then(function(html) {
+                var parser = new DOMParser();
+                var doc = parser.parseFromString(html, 'text/html');
+
+                // Extract new workspace
+                var newWorkspace = doc.querySelector('.workspace');
+                if (!newWorkspace) { window.location = url; return; }
+
+                // Swap workspace
+                workspace.outerHTML = newWorkspace.outerHTML;
+
+                // Update document title
+                var newTitle = doc.querySelector('title');
+                if (newTitle) document.title = newTitle.textContent;
+
+                // Update toolbar active state
+                var newToolbarNav = doc.querySelector('.toolbar-nav');
+                var currentToolbarNav = document.querySelector('.toolbar-nav');
+                if (newToolbarNav && currentToolbarNav) {
+                    currentToolbarNav.innerHTML = newToolbarNav.innerHTML;
+                }
+
+                // Update URL
+                if (!skipPush) history.pushState(null, '', url);
+
+                // Re-initialize htmx on new content
+                var ws = document.querySelector('.workspace');
+                if (ws && window.htmx) htmx.process(ws);
+
+                // Re-init editor if query page
+                var queryWs = document.getElementById('query-workspace');
+                if (queryWs && window.SQLEditor) SQLEditor.init(queryWs);
+
+                // Highlight active tree item
+                treeHighlightCurrent();
+
+                // Scroll content to top
+                var content = document.querySelector('.content');
+                if (content) content.scrollTop = 0;
+            })
+            .catch(function() {
+                // Fallback to full navigation on error
+                window.location = url;
+            });
+    }
+
+    // Expose for programmatic navigation
+    window.spaNavigate = spaNavigate;
+})();
+
 // ─── Data Grid: Cell Selection & Inline Editing ─────────────────────────
 
 (function() {
@@ -536,14 +629,21 @@ function toggleSidebar() {
 })();
 
 function editCell(span, initialChar) {
-    if (span.querySelector('.cell-edit-input')) return;
+    if (span.querySelector('.cell-edit-input') || span.querySelector('textarea')) return;
+
+    // For long values, open a modal instead
+    if (span.classList.contains('cell-long') || (span.getAttribute('data-full') && !initialChar)) {
+        openCellModal(span);
+        return;
+    }
 
     var currentValue = span.textContent;
     var col = span.getAttribute('data-col');
-    var schema = span.getAttribute('data-schema');
-    var table = span.getAttribute('data-table');
-    var db = span.getAttribute('data-db');
-    var where = span.getAttribute('data-where');
+    var ctid = span.getAttribute('data-ctid');
+    var tr = span.closest('tr');
+    var schema = tr ? tr.getAttribute('data-schema') : '';
+    var table = tr ? tr.getAttribute('data-table') : '';
+    var db = tr ? tr.getAttribute('data-db') : '';
 
     span.classList.add('cell-editing');
     var input = document.createElement('input');
@@ -566,70 +666,138 @@ function editCell(span, initialChar) {
 
         if (newValue === currentValue) {
             span.textContent = currentValue;
-            if (moveDirection) moveTo(moveDirection);
+            if (moveDirection) moveTo(span, moveDirection);
             return;
         }
 
         span.textContent = newValue;
         span.classList.add('cell-saving');
-
-        fetch('/db/' + db + '/schema/' + schema + '/table/' + table + '/update-cell', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: 'col=' + encodeURIComponent(col) + '&val=' + encodeURIComponent(newValue) + '&where=' + encodeURIComponent(where)
-        }).then(function(r) { return r.json(); }).then(function(data) {
-            span.classList.remove('cell-saving');
-            if (data.error) {
-                span.textContent = currentValue;
-                span.classList.add('cell-error');
-                setTimeout(function() { span.classList.remove('cell-error'); }, 2000);
-            } else {
-                span.classList.add('cell-saved');
-                setTimeout(function() { span.classList.remove('cell-saved'); }, 1500);
-                // Update the where clause for this row since the value changed
-                span.closest('tr').querySelectorAll('.editable-cell').forEach(function(c) {
-                    // The where clause contains old values — update this cell's part
-                    var oldWhere = c.getAttribute('data-where');
-                    if (oldWhere) {
-                        c.setAttribute('data-where', oldWhere.replace(
-                            new RegExp('"' + col.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '"\\s*=\\s*\'[^\']*\''),
-                            '"' + col + "' = '" + newValue.replace(/'/g, "''") + "'"
-                        ));
-                    }
-                });
-            }
-        }).catch(function() {
-            span.classList.remove('cell-saving');
-            span.textContent = currentValue;
-        });
-
-        if (moveDirection) moveTo(moveDirection);
-    }
-
-    function moveTo(dir) {
-        var td = span.closest('td');
-        var tr = td ? td.closest('tr') : null;
-        if (!td || !tr) return;
-        var target = null;
-        if (dir === 'right') {
-            var next = td.nextElementSibling;
-            while (next) { target = next.querySelector('.editable-cell'); if (target) break; next = next.nextElementSibling; }
-        } else if (dir === 'down') {
-            var idx = Array.from(tr.children).indexOf(td);
-            var nextRow = tr.nextElementSibling;
-            if (nextRow && nextRow.children[idx]) target = nextRow.children[idx].querySelector('.editable-cell');
-        }
-        if (target) {
-            target.classList.add('cell-selected');
-            target.closest('tr').classList.add('row-active');
-        }
+        saveCellValue(db, schema, table, col, ctid, newValue, span, currentValue);
+        if (moveDirection) moveTo(span, moveDirection);
     }
 
     input.addEventListener('blur', function() { if (!committed) commit(null); });
     input.addEventListener('keydown', function(e) {
         if (e.key === 'Enter') { e.preventDefault(); commit('down'); }
-        else if (e.key === 'Tab') { e.preventDefault(); commit(e.shiftKey ? null : 'right'); }
+        else if (e.key === 'Tab') { e.preventDefault(); commit(e.shiftKey ? 'left' : 'right'); }
         else if (e.key === 'Escape') { committed = true; span.classList.remove('cell-editing'); span.textContent = currentValue; }
+    });
+}
+
+function saveCellValue(db, schema, table, col, ctid, newValue, span, oldValue) {
+    fetch('/db/' + db + '/schema/' + schema + '/table/' + table + '/update-cell', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'col=' + encodeURIComponent(col) + '&val=' + encodeURIComponent(newValue) + '&ctid=' + encodeURIComponent(ctid)
+    }).then(function(r) { return r.json(); }).then(function(data) {
+        span.classList.remove('cell-saving');
+        if (data.error) {
+            span.textContent = oldValue;
+            span.classList.add('cell-error');
+            setTimeout(function() { span.classList.remove('cell-error'); }, 2000);
+        } else {
+            span.classList.add('cell-saved');
+            setTimeout(function() { span.classList.remove('cell-saved'); }, 1500);
+        }
+    }).catch(function() {
+        span.classList.remove('cell-saving');
+        span.textContent = oldValue;
+    });
+}
+
+function moveTo(fromSpan, dir) {
+    var td = fromSpan.closest('td');
+    var tr = td ? td.closest('tr') : null;
+    if (!td || !tr) return;
+    var target = null;
+    if (dir === 'right') {
+        var next = td.nextElementSibling;
+        while (next) { target = next.querySelector('.editable-cell'); if (target) break; next = next.nextElementSibling; }
+    } else if (dir === 'left') {
+        var prev = td.previousElementSibling;
+        while (prev) { target = prev.querySelector('.editable-cell'); if (target) break; prev = prev.previousElementSibling; }
+    } else if (dir === 'down') {
+        var idx = Array.from(tr.children).indexOf(td);
+        var nextRow = tr.nextElementSibling;
+        if (nextRow && nextRow.children[idx]) target = nextRow.children[idx].querySelector('.editable-cell');
+    }
+    if (target) {
+        target.classList.add('cell-selected');
+        var newTr = target.closest('tr');
+        if (newTr) newTr.classList.add('row-active');
+    }
+}
+
+// ─── Cell Modal (for long values like JSON, text) ────────────────────────
+
+function openCellModal(span) {
+    var col = span.getAttribute('data-col');
+    var ctid = span.getAttribute('data-ctid');
+    var tr = span.closest('tr');
+    var schema = tr ? tr.getAttribute('data-schema') : '';
+    var table = tr ? tr.getAttribute('data-table') : '';
+    var db = tr ? tr.getAttribute('data-db') : '';
+    var fullValue = span.getAttribute('data-full') || span.textContent;
+
+    var overlay = document.createElement('div');
+    overlay.className = 'command-overlay';
+
+    var modal = document.createElement('div');
+    modal.className = 'cell-modal';
+    modal.innerHTML =
+        '<div class="cell-modal-header">' +
+        '<span class="cell-modal-title">Edit: <code>' + col.replace(/</g, '&lt;') + '</code></span>' +
+        '<button class="cell-modal-close" onclick="this.closest(\'.command-overlay\').remove()">&times;</button>' +
+        '</div>' +
+        '<textarea class="cell-modal-textarea" spellcheck="false">' + fullValue.replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</textarea>' +
+        '<div class="cell-modal-footer">' +
+        '<span class="cell-modal-info">' + fullValue.length + ' chars</span>' +
+        '<div class="btn-group">' +
+        '<button class="btn btn-sm" data-action="cancel">Cancel</button>' +
+        '<button class="btn btn-sm btn-primary" data-action="save">Save</button>' +
+        '</div></div>';
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    var textarea = modal.querySelector('textarea');
+    textarea.focus();
+    textarea.selectionStart = textarea.selectionEnd = textarea.value.length;
+
+    // Update char count
+    textarea.addEventListener('input', function() {
+        modal.querySelector('.cell-modal-info').textContent = textarea.value.length + ' chars';
+    });
+
+    overlay.addEventListener('click', function(e) {
+        if (e.target === overlay) overlay.remove();
+        var action = e.target.getAttribute('data-action');
+        if (action === 'cancel') overlay.remove();
+        if (action === 'save') {
+            var newValue = textarea.value;
+            var oldValue = fullValue;
+            // Update display
+            if (newValue.length <= 80) {
+                span.textContent = newValue;
+                span.classList.remove('cell-long');
+                span.removeAttribute('data-full');
+            } else {
+                span.textContent = newValue.substring(0, 60);
+                span.innerHTML = span.textContent.replace(/</g, '&lt;') + '&hellip;';
+                span.setAttribute('data-full', newValue);
+            }
+            span.classList.add('cell-saving');
+            saveCellValue(db, schema, table, col, ctid, newValue, span, oldValue);
+            overlay.remove();
+        }
+    });
+
+    // Ctrl+Enter to save
+    textarea.addEventListener('keydown', function(e) {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+            modal.querySelector('[data-action="save"]').click();
+        }
+        if (e.key === 'Escape') overlay.remove();
     });
 }
 

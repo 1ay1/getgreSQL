@@ -19,19 +19,19 @@ auto MonitorPageHandler::handle(Request& req, AppContext& /*ctx*/) -> Response {
 
     // Section tabs for different monitoring views
     content += "<div class=\"section-tabs\">"
-        "<button class=\"section-tab active\" onclick=\"this.parentElement.querySelectorAll('.active').forEach(e=>e.classList.remove('active')); this.classList.add('active')\" "
+        "<button class=\"section-tab active\" hx-on::before-request=\"this.parentElement.querySelectorAll('.active').forEach(function(e){e.classList.remove('active')}); this.classList.add('active')\" "
         "hx-get=\"/monitor/activity\" hx-target=\"#monitor-content\" hx-swap=\"innerHTML\">Active Queries</button>"
-        "<button class=\"section-tab\" onclick=\"this.parentElement.querySelectorAll('.active').forEach(e=>e.classList.remove('active')); this.classList.add('active')\" "
+        "<button class=\"section-tab\" hx-on::before-request=\"this.parentElement.querySelectorAll('.active').forEach(function(e){e.classList.remove('active')}); this.classList.add('active')\" "
         "hx-get=\"/monitor/slow\" hx-target=\"#monitor-content\" hx-swap=\"innerHTML\">Slow Queries</button>"
-        "<button class=\"section-tab\" onclick=\"this.parentElement.querySelectorAll('.active').forEach(e=>e.classList.remove('active')); this.classList.add('active')\" "
+        "<button class=\"section-tab\" hx-on::before-request=\"this.parentElement.querySelectorAll('.active').forEach(function(e){e.classList.remove('active')}); this.classList.add('active')\" "
         "hx-get=\"/monitor/blocking\" hx-target=\"#monitor-content\" hx-swap=\"innerHTML\">Blocking</button>"
-        "<button class=\"section-tab\" onclick=\"this.parentElement.querySelectorAll('.active').forEach(e=>e.classList.remove('active')); this.classList.add('active')\" "
+        "<button class=\"section-tab\" hx-on::before-request=\"this.parentElement.querySelectorAll('.active').forEach(function(e){e.classList.remove('active')}); this.classList.add('active')\" "
         "hx-get=\"/monitor/vacuum-progress\" hx-target=\"#monitor-content\" hx-swap=\"innerHTML\">Vacuum Progress</button>"
-        "<button class=\"section-tab\" onclick=\"this.parentElement.querySelectorAll('.active').forEach(e=>e.classList.remove('active')); this.classList.add('active')\" "
+        "<button class=\"section-tab\" hx-on::before-request=\"this.parentElement.querySelectorAll('.active').forEach(function(e){e.classList.remove('active')}); this.classList.add('active')\" "
         "hx-get=\"/monitor/wal\" hx-target=\"#monitor-content\" hx-swap=\"innerHTML\">WAL</button>"
-        "<button class=\"section-tab\" onclick=\"this.parentElement.querySelectorAll('.active').forEach(e=>e.classList.remove('active')); this.classList.add('active')\" "
+        "<button class=\"section-tab\" hx-on::before-request=\"this.parentElement.querySelectorAll('.active').forEach(function(e){e.classList.remove('active')}); this.classList.add('active')\" "
         "hx-get=\"/monitor/databases\" hx-target=\"#monitor-content\" hx-swap=\"innerHTML\">Databases</button>"
-        "<button class=\"section-tab\" onclick=\"this.parentElement.querySelectorAll('.active').forEach(e=>e.classList.remove('active')); this.classList.add('active')\" "
+        "<button class=\"section-tab\" hx-on::before-request=\"this.parentElement.querySelectorAll('.active').forEach(function(e){e.classList.remove('active')}); this.classList.add('active')\" "
         "hx-get=\"/monitor/bloat\" hx-target=\"#monitor-content\" hx-swap=\"innerHTML\">Bloat</button>"
         "</div>";
 

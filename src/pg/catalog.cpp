@@ -497,7 +497,7 @@ auto table_ddl(const Connection& conn, std::string_view schema, std::string_view
         "SELECT string_agg(a.attname, ', ' ORDER BY array_position(i.indkey, a.attnum)) "
         "FROM pg_index i "
         "JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) "
-        "WHERE i.indrelid = '\"{}\".\"{}\"\t'::regclass AND i.indisprimary",
+        "WHERE i.indrelid = '\"{}\".\"{}\"'::regclass AND i.indisprimary",
         schema, table
     );
     auto pk = conn.exec(pk_sql);
@@ -509,7 +509,7 @@ auto table_ddl(const Connection& conn, std::string_view schema, std::string_view
     auto uq_sql = std::format(
         "SELECT conname, pg_get_constraintdef(oid) "
         "FROM pg_constraint "
-        "WHERE conrelid = '\"{}\".\"{}\"\t'::regclass AND contype = 'u'",
+        "WHERE conrelid = '\"{}\".\"{}\"'::regclass AND contype = 'u'",
         schema, table
     );
     auto uqs = conn.exec(uq_sql);
@@ -523,7 +523,7 @@ auto table_ddl(const Connection& conn, std::string_view schema, std::string_view
     auto fk_sql = std::format(
         "SELECT conname, pg_get_constraintdef(oid) "
         "FROM pg_constraint "
-        "WHERE conrelid = '\"{}\".\"{}\"\t'::regclass AND contype = 'f'",
+        "WHERE conrelid = '\"{}\".\"{}\"'::regclass AND contype = 'f'",
         schema, table
     );
     auto fks = conn.exec(fk_sql);
@@ -537,7 +537,7 @@ auto table_ddl(const Connection& conn, std::string_view schema, std::string_view
     auto ck_sql = std::format(
         "SELECT conname, pg_get_constraintdef(oid) "
         "FROM pg_constraint "
-        "WHERE conrelid = '\"{}\".\"{}\"\t'::regclass AND contype = 'c'",
+        "WHERE conrelid = '\"{}\".\"{}\"'::regclass AND contype = 'c'",
         schema, table
     );
     auto cks = conn.exec(ck_sql);
@@ -555,7 +555,7 @@ auto table_ddl(const Connection& conn, std::string_view schema, std::string_view
         "WHERE schemaname = '{}' AND tablename = '{}' "
         "AND indexname NOT IN ("
         "  SELECT conname FROM pg_constraint "
-        "  WHERE conrelid = '\"{}\".\"{}\"\t'::regclass AND contype IN ('p','u')"
+        "  WHERE conrelid = '\"{}\".\"{}\"'::regclass AND contype IN ('p','u')"
         ")",
         schema, table, schema, table
     );
@@ -697,7 +697,7 @@ auto schema_erd(const Connection& conn, std::string_view schema) -> Result<ERDDa
 
 auto vacuum_table(const Connection& conn, std::string_view schema,
                    std::string_view table) -> Result<bool> {
-    auto sql = std::format("VACUUM \"{}\".\"{}\"\t", schema, table);
+    auto sql = std::format("VACUUM \"{}\".\"{}\"", schema, table);
     auto res = conn.exec(sql);
     if (!res) return std::unexpected(res.error());
     return true;
@@ -705,7 +705,7 @@ auto vacuum_table(const Connection& conn, std::string_view schema,
 
 auto analyze_table(const Connection& conn, std::string_view schema,
                     std::string_view table) -> Result<bool> {
-    auto sql = std::format("ANALYZE \"{}\".\"{}\"\t", schema, table);
+    auto sql = std::format("ANALYZE \"{}\".\"{}\"", schema, table);
     auto res = conn.exec(sql);
     if (!res) return std::unexpected(res.error());
     return true;

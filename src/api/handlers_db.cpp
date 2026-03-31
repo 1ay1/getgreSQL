@@ -286,8 +286,8 @@ auto TableDetailHandler::handle(Request& req, AppContext& ctx) -> Response {
 
     auto tab_btn = [](std::string_view url) {
         return std::format(
-            " hx-get=\"{}\" hx-target=\"#tab-content\" hx-swap=\"innerHTML\""
-            " onclick=\"this.parentElement.querySelectorAll('.active').forEach(e=>e.classList.remove('active')); this.classList.add('active')\"", url);
+            " hx-get=\"{}\" hx-target=\"#tab-content\" hx-swap=\"innerHTML\" hx-trigger=\"click\""
+            " hx-on::before-request=\"this.parentElement.querySelectorAll('.active').forEach(function(e){{e.classList.remove('active')}}); this.classList.add('active')\"", url);
     };
 
     content += "<div style=\"display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--sp-3)\">";
@@ -607,7 +607,7 @@ auto ERDPageHandler::handle(Request& req, AppContext& /*ctx*/) -> Response {
     return Response::html(html::page(title, "Dashboard", std::move(content)));
 }
 
-// ─── TableBrowseHandler — paginated editable data grid ──────────────
+// ─── TableBrowseHandler — fast paginated editable data grid ─────────
 
 auto TableBrowseHandler::handle(Request& req, AppContext& ctx) -> Response {
     auto db_name = req.param("db");
@@ -618,35 +618,32 @@ auto TableBrowseHandler::handle(Request& req, AppContext& ctx) -> Response {
     auto limit_str = req.query("limit");
     auto sort_col = req.query("sort");
     auto sort_dir = req.query("dir");
-    auto filter = req.query("filter");
 
     int page = 1, limit = 50;
     if (!page_str.empty()) try { page = std::stoi(std::string(page_str)); } catch (...) {}
     if (!limit_str.empty()) try { limit = std::stoi(std::string(limit_str)); } catch (...) {}
     if (page < 1) page = 1;
-    if (limit < 1) limit = 1;
-    if (limit > 500) limit = 500;
+    if (limit < 1 || limit > 500) limit = 50;
     int offset = (page - 1) * limit;
 
     auto conn = ctx.pool.checkout();
     if (!conn) return Response::html(html::alert(error_message(conn.error()), "error"));
 
-    // Count total rows
-    auto count_sql = std::format("SELECT COUNT(*) FROM \"{}\".\"{}\"\t", schema_name, table_name);
-    if (!filter.empty()) {
-        count_sql = std::format("SELECT COUNT(*) FROM \"{}\".\"{}\" WHERE {}", schema_name, table_name, filter);
-    }
-    auto count_res = conn->get().exec(count_sql);
+    // Count total rows (use estimate for speed on large tables)
+    auto count_res = conn->get().exec(std::format(
+        "SELECT reltuples::bigint FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
+        "WHERE n.nspname='{}' AND c.relname='{}'", schema_name, table_name));
     long long total_rows = 0;
-    if (count_res) total_rows = count_res->get_int(0, 0).value_or(0);
-    int total_pages = static_cast<int>((total_rows + limit - 1) / limit);
+    if (count_res && count_res->row_count() > 0) {
+        total_rows = count_res->get_int(0, 0).value_or(0);
+        if (total_rows < 0) total_rows = 0; // -1 means never analyzed
+    }
+    int total_pages = std::max(1, static_cast<int>((total_rows + limit - 1) / limit));
 
-    // Fetch data
-    auto data_sql = std::format("SELECT * FROM \"{}\".\"{}\"", schema_name, table_name);
-    if (!filter.empty()) data_sql += std::format(" WHERE {}", filter);
+    // Fetch data WITH ctid for row identification (fast, small response)
+    auto data_sql = std::format("SELECT ctid, * FROM \"{}\".\"{}\"", schema_name, table_name);
     if (!sort_col.empty()) {
-        auto dir = (sort_dir == "desc") ? "DESC" : "ASC";
-        data_sql += std::format(" ORDER BY \"{}\" {}", sort_col, dir);
+        data_sql += std::format(" ORDER BY \"{}\" {}", sort_col, (sort_dir == "desc") ? "DESC" : "ASC");
     }
     data_sql += std::format(" LIMIT {} OFFSET {}", limit, offset);
 
@@ -656,111 +653,97 @@ auto TableBrowseHandler::handle(Request& req, AppContext& ctx) -> Response {
     );
 
     auto base_url = std::format("/db/{}/schema/{}/table/{}/browse", db_name, schema_name, table_name);
+    auto meta = std::format("data-schema=\"{}\" data-table=\"{}\" data-db=\"{}\"",
+        html::escape(schema_name), html::escape(table_name), html::escape(db_name));
 
     std::string content;
 
-    // Toolbar row
+    // Toolbar
     content += "<div class=\"data-toolbar\">";
-    content += std::format("<span class=\"data-info\">{} rows | Page {} of {}</span>", total_rows, page, std::max(total_pages, 1));
+    content += std::format("<span class=\"data-info\">~{} rows | Page {} of ~{}</span>", total_rows, page, total_pages);
     content += "<div class=\"btn-group\">";
-    if (page > 1) {
-        content += std::format("<button class=\"btn btn-sm\" hx-get=\"{}?page={}&limit={}\" hx-target=\"#tab-content\" hx-swap=\"innerHTML\">&laquo; Prev</button>", base_url, page-1, limit);
-    }
-    if (page < total_pages) {
-        content += std::format("<button class=\"btn btn-sm\" hx-get=\"{}?page={}&limit={}\" hx-target=\"#tab-content\" hx-swap=\"innerHTML\">Next &raquo;</button>", base_url, page+1, limit);
+    if (page > 1)
+        content += std::format("<button class=\"btn btn-sm\" hx-get=\"{}?page=1&limit={}\" hx-target=\"#tab-content\" hx-swap=\"innerHTML\">&laquo;</button>", base_url, limit);
+    if (page > 1)
+        content += std::format("<button class=\"btn btn-sm\" hx-get=\"{}?page={}&limit={}\" hx-target=\"#tab-content\" hx-swap=\"innerHTML\">&lsaquo; Prev</button>", base_url, page-1, limit);
+    if (page < total_pages)
+        content += std::format("<button class=\"btn btn-sm\" hx-get=\"{}?page={}&limit={}\" hx-target=\"#tab-content\" hx-swap=\"innerHTML\">Next &rsaquo;</button>", base_url, page+1, limit);
+    content += "</div>";
+    content += "<div class=\"btn-group\">";
+    for (auto sz : {25, 50, 100, 250}) {
+        auto cls = (sz == limit) ? "btn btn-sm btn-primary" : "btn btn-sm";
+        content += std::format("<button class=\"{}\" hx-get=\"{}?page=1&limit={}\" hx-target=\"#tab-content\" hx-swap=\"innerHTML\">{}</button>", cls, base_url, sz, sz);
     }
     content += "</div>";
-    content += std::format("<a href=\"/db/{}/schema/{}/table/{}/export\" class=\"btn btn-sm\">Export CSV</a>", db_name, schema_name, table_name);
-    content += std::format("<button class=\"btn btn-sm btn-success\" onclick=\"document.getElementById('insert-form').style.display=''\">+ Insert Row</button>");
+    content += std::format("<a href=\"/db/{}/schema/{}/table/{}/export\" class=\"btn btn-sm\">CSV</a>", db_name, schema_name, table_name);
+    content += std::format("<button class=\"btn btn-sm btn-success\" onclick=\"document.getElementById('insert-form').style.display=document.getElementById('insert-form').style.display==='none'?'':'none'\">+ Insert</button>");
     content += "</div>";
 
-    // Insert row form (hidden by default)
+    // Insert row form (hidden)
     content += "<div id=\"insert-form\" style=\"display:none\" class=\"insert-form\">";
     content += std::format("<form hx-post=\"/db/{}/schema/{}/table/{}/insert-row\" hx-target=\"#tab-content\" hx-swap=\"innerHTML\">", db_name, schema_name, table_name);
     content += "<div class=\"insert-form-grid\">";
-    for (int c = 0; c < result->col_count(); ++c) {
+    // Skip column 0 which is ctid
+    for (int c = 1; c < result->col_count(); ++c) {
         auto col_name = std::string(result->column_name(c));
         content += std::format(
             "<div class=\"insert-field\"><label>{}</label>"
             "<input type=\"text\" name=\"col_{}\" placeholder=\"{}\" class=\"insert-input\"></div>",
-            html::escape(col_name), c, html::escape(col_name)
-        );
+            html::escape(col_name), c - 1, html::escape(col_name));
     }
-    content += "</div>";
-    content += "<div class=\"insert-actions\"><button type=\"submit\" class=\"btn btn-sm btn-primary\">Insert</button>";
-    content += "<button type=\"button\" class=\"btn btn-sm\" onclick=\"this.closest('#insert-form').style.display='none'\">Cancel</button></div>";
-    content += "</form></div>";
+    content += "</div><div class=\"insert-actions\">";
+    content += "<button type=\"submit\" class=\"btn btn-sm btn-primary\">Insert</button>";
+    content += "<button type=\"button\" class=\"btn btn-sm\" onclick=\"this.closest('#insert-form').style.display='none'\">Cancel</button>";
+    content += "</div></form></div>";
 
-    // Data table with editable cells
-    std::vector<html::TableColumn> headers;
-    headers.push_back({"#", "num"});
-    for (int c = 0; c < result->col_count(); ++c) {
-        headers.push_back({std::string(result->column_name(c)), "", true});
+    // Data grid — column 0 is ctid (hidden), columns 1+ are data
+    content += "<div class=\"table-wrapper scrollable\" id=\"data-grid-wrap\"><table id=\"data-grid\">";
+    content += "<thead><tr><th class=\"row-num-header\">#</th>";
+    for (int c = 1; c < result->col_count(); ++c) {
+        content += std::format("<th class=\"sortable\">{}</th>", html::escape(result->column_name(c)));
     }
-    headers.push_back({"", ""}); // actions column
-    content += html::table_begin(headers, "data-grid");
+    content += "<th></th></tr></thead><tbody>";
 
     for (auto row : *result) {
-        int row_idx = row.index();
-        // Build a WHERE clause identifying this row (use all columns for safety)
-        std::string where_parts;
-        for (int c = 0; c < row.col_count(); ++c) {
-            if (!where_parts.empty()) where_parts += " AND ";
+        auto ctid = std::string(row[0]); // ctid is column 0
+        auto row_num = offset + row.index() + 1;
+
+        content += std::format("<tr data-ctid=\"{}\" {}>", html::escape(ctid), meta);
+        content += std::format("<td class=\"row-num\">{}</td>", row_num);
+
+        for (int c = 1; c < row.col_count(); ++c) {
+            auto col_name = result->column_name(c);
             if (row.is_null(c)) {
-                where_parts += std::format("\"{}\" IS NULL", result->column_name(c));
+                content += std::format("<td><span class=\"null-value editable-cell\" data-col=\"{}\" data-ctid=\"{}\">NULL</span></td>", html::escape(col_name), html::escape(ctid));
             } else {
                 auto val = std::string(row[c]);
-                // Escape single quotes
-                std::string escaped;
-                for (char ch : val) { if (ch == '\'') escaped += "''"; else escaped += ch; }
-                where_parts += std::format("\"{}\" = '{}'", result->column_name(c), escaped);
+                // Short values: show inline. Long values: truncate with expand button
+                if (val.size() <= 80) {
+                    content += std::format("<td><span class=\"editable-cell\" data-col=\"{}\" data-ctid=\"{}\">{}</span></td>",
+                        html::escape(col_name), html::escape(ctid), html::escape(val));
+                } else {
+                    auto preview = html::escape(val.substr(0, 60));
+                    content += std::format(
+                        "<td><span class=\"editable-cell cell-long\" data-col=\"{}\" data-ctid=\"{}\" "
+                        "data-full=\"{}\">{}&hellip;</span></td>",
+                        html::escape(col_name), html::escape(ctid),
+                        html::escape(val), preview);
+                }
             }
         }
 
-        std::vector<std::string> cells;
-        cells.push_back(std::to_string(offset + row_idx + 1));
-
-        for (int c = 0; c < row.col_count(); ++c) {
-            if (row.is_null(c)) {
-                cells.push_back("<span class=\"null-value\">NULL</span>");
-            } else {
-                auto val = row[c];
-                auto display = val.size() > 200 ? html::escape(val.substr(0, 200)) + "..." : html::escape(val);
-                cells.push_back(std::format(
-                    "<span class=\"editable-cell\" data-col=\"{}\" data-schema=\"{}\" data-table=\"{}\" "
-                    "data-db=\"{}\" data-where=\"{}\">{}</span>",
-                    html::escape(result->column_name(c)), html::escape(schema_name),
-                    html::escape(table_name), html::escape(db_name),
-                    html::escape(where_parts), display
-                ));
-            }
-        }
-
-        // Delete button
-        cells.push_back(std::format(
-            "<button class=\"btn btn-sm btn-danger\" "
+        // Delete
+        content += std::format(
+            "<td><button class=\"btn btn-sm btn-danger\" "
             "hx-post=\"/db/{}/schema/{}/table/{}/delete-row\" "
-            "hx-vals='{{\"where\":\"{}\"}}' "
+            "hx-vals='{{\"ctid\":\"{}\"}}' "
             "hx-target=\"#tab-content\" hx-swap=\"innerHTML\" "
-            "hx-confirm=\"Delete this row?\">Del</button>",
-            db_name, schema_name, table_name, json_escape_str(where_parts)
-        ));
+            "hx-confirm=\"Delete this row?\">&#10005;</button></td>",
+            db_name, schema_name, table_name, json_escape_str(ctid));
 
-        content += html::table_row(cells);
+        content += "</tr>";
     }
-    content += html::table_end();
-
-    // Page size selector
-    content += "<div class=\"data-toolbar\">";
-    content += "<span class=\"data-info\">Rows per page: ";
-    for (auto sz : {25, 50, 100, 250, 500}) {
-        if (sz == limit) {
-            content += std::format("<strong>{}</strong> ", sz);
-        } else {
-            content += std::format("<a href=\"#\" hx-get=\"{}?page=1&limit={}\" hx-target=\"#tab-content\" hx-swap=\"innerHTML\">{}</a> ", base_url, sz, sz);
-        }
-    }
-    content += "</span></div>";
+    content += "</tbody></table></div>";
 
     return Response::html(html::partial(std::move(content)));
 }
@@ -774,18 +757,18 @@ auto CellUpdateHandler::handle(Request& req, AppContext& ctx) -> Response {
 
     auto col = form_value(body, "col");
     auto val = form_value(body, "val");
-    auto where = form_value(body, "where");
+    auto ctid = form_value(body, "ctid");
 
-    if (col.empty() || where.empty()) return Response::error("Missing parameters", 400);
+    if (col.empty() || ctid.empty()) return Response::json("{\"error\":\"Missing parameters\"}", 400);
 
     auto conn = ctx.pool.checkout();
-    if (!conn) return Response::html(html::alert(error_message(conn.error()), "error"));
+    if (!conn) return Response::json("{\"error\":\"Connection failed\"}", 500);
 
-    // Escape single quotes in value
     std::string escaped_val;
     for (char c : val) { if (c == '\'') escaped_val += "''"; else escaped_val += c; }
 
-    auto sql = std::format("UPDATE \"{}\".\"{}\"\t SET \"{}\" = '{}' WHERE {}", schema_name, table_name, col, escaped_val, where);
+    auto sql = std::format("UPDATE \"{}\".\"{}\" SET \"{}\" = '{}' WHERE ctid = '{}'",
+        schema_name, table_name, col, escaped_val, ctid);
     auto result = conn->get().exec(sql);
     if (!result) {
         return Response::json(std::format("{{\"error\":\"{}\"}}", json_escape_str(error_message(result.error()))), 400);
@@ -801,20 +784,16 @@ auto RowDeleteHandler::handle(Request& req, AppContext& ctx) -> Response {
     auto table_name = req.param("table");
     auto body = std::string(req.body());
 
-    auto where = form_value(body, "where");
-    if (where.empty()) return Response::error("No row identified", 400);
+    auto ctid = form_value(body, "ctid");
+    if (ctid.empty()) return Response::error("No row identified", 400);
 
     auto conn = ctx.pool.checkout();
     if (!conn) return Response::html(html::alert(error_message(conn.error()), "error"));
 
-    auto sql = std::format("DELETE FROM \"{}\".\"{}\"\t WHERE {} LIMIT 1", schema_name, table_name, where);
-    // PostgreSQL doesn't support LIMIT in DELETE, use subquery
-    sql = std::format("DELETE FROM \"{}\".\"{}\" WHERE ctid = (SELECT ctid FROM \"{}\".\"{}\"\t WHERE {} LIMIT 1)",
-        schema_name, table_name, schema_name, table_name, where);
+    auto sql = std::format("DELETE FROM \"{}\".\"{}\" WHERE ctid = '{}'", schema_name, table_name, ctid);
     auto result = conn->get().exec(sql);
     if (!result) return Response::html(html::alert(error_message(result.error()), "error"));
 
-    // Return updated browse view
     auto browse_url = std::format("/db/{}/schema/{}/table/{}/browse", db_name, schema_name, table_name);
     return Response::html(std::format("<div hx-get=\"{}\" hx-trigger=\"load\" hx-target=\"#tab-content\" hx-swap=\"innerHTML\">"
         "<div class=\"alert alert-info\">Row deleted</div></div>", browse_url));

@@ -36,7 +36,7 @@ inline auto toolbar(std::string_view active_page = "") -> std::string {
                        std::string_view label) -> std::string {
         auto cls = (active_page == label) ? "toolbar-btn active" : "toolbar-btn";
         return std::format(
-            "<a href=\"{}\" class=\"{}\">"
+            "<a href=\"{}\" class=\"{}\" data-spa>"
             "<span class=\"icon\">{}</span> {}</a>",
             href, cls, icon, label
         );
@@ -181,7 +181,7 @@ inline auto tree_node_leaf(std::string_view icon_class, std::string_view label,
                             std::string_view extra = "") -> std::string {
     return std::format(
         "<li class=\"tree-item\">"
-        "<a class=\"tree-row\" style=\"--tree-depth:{}\" href=\"{}\">"
+        "<a class=\"tree-row\" style=\"--tree-depth:{}\" href=\"{}\" data-spa>"
         "<span class=\"tree-chevron empty\"></span>"
         "<span class=\"tree-icon {}\">&#9679;</span>"
         "<span class=\"tree-text\">{}</span>"

@@ -494,6 +494,7 @@ var EditorSettings = {
         lineHighlight: true,
         bracketColors: true,
         indentGuides: true,
+        blockCursor: false,
     },
     _cache: null,
 
@@ -598,6 +599,12 @@ SQLEditorInstance.prototype.build = function() {
     this.minimapEl.appendChild(this.minimapCanvas);
     this.minimapEl.appendChild(this.minimapViewport);
     this.editorArea.appendChild(this.minimapEl);
+
+    // Block cursor element
+    this.blockCursorEl = document.createElement('div');
+    this.blockCursorEl.className = 'editor-block-cursor';
+    this.blockCursorEl.style.display = 'none';
+    this.editorArea.appendChild(this.blockCursorEl);
 
     this.editorContainer = document.createElement('div');
     this.editorContainer.className = 'editor-container';
@@ -1560,6 +1567,29 @@ SQLEditorInstance.prototype.updateCurrentLine = function() {
         cursorInfo.textContent = info;
     }
 
+    // Block cursor positioning
+    if (this.settings.blockCursor && this.blockCursorEl) {
+        this.editorArea.classList.add('block-cursor');
+        var lineH = parseFloat(getComputedStyle(ta).lineHeight) || (this.settings.fontSize * 1.6);
+        var padTop = parseFloat(getComputedStyle(ta).paddingTop) || 12;
+        var padLeft = parseFloat(getComputedStyle(ta).paddingLeft) || 12;
+        if (!this._charWidth) {
+            var sp = document.createElement('span');
+            sp.style.cssText = 'position:absolute;visibility:hidden;font-family:' + getComputedStyle(ta).fontFamily + ';font-size:' + getComputedStyle(ta).fontSize;
+            sp.textContent = 'x';
+            document.body.appendChild(sp);
+            this._charWidth = sp.getBoundingClientRect().width;
+            document.body.removeChild(sp);
+        }
+        this.blockCursorEl.style.display = (ta.selectionStart === ta.selectionEnd) ? '' : 'none';
+        this.blockCursorEl.style.top = (padTop + line * lineH - ta.scrollTop) + 'px';
+        this.blockCursorEl.style.left = (padLeft + col * this._charWidth - ta.scrollLeft) + 'px';
+        this.blockCursorEl.style.height = lineH + 'px';
+    } else if (this.blockCursorEl) {
+        this.editorArea.classList.remove('block-cursor');
+        this.blockCursorEl.style.display = 'none';
+    }
+
     // Selection word highlighting
     var newWord = '';
     if (ta.selectionStart !== ta.selectionEnd) {
@@ -1723,6 +1753,11 @@ SQLEditorInstance.prototype.applySettings = function() {
         this.currentLineEl.style.display = s.lineHighlight ? '' : 'none';
     }
 
+    // Block cursor
+    if (this.editorArea) {
+        this.editorArea.classList.toggle('block-cursor', !!s.blockCursor);
+    }
+
     // Reset char width cache on font size change
     this._charWidth = null;
 };
@@ -1779,6 +1814,8 @@ SQLEditorInstance.prototype.openSettings = function() {
         '<button class="settings-toggle' + (s.bracketColors ? ' on' : '') + '" data-toggle="bracketColors"></button></div>' +
         '<div class="settings-row"><span class="settings-label">Indent Guides</span>' +
         '<button class="settings-toggle' + (s.indentGuides ? ' on' : '') + '" data-toggle="indentGuides"></button></div>' +
+        '<div class="settings-row"><span class="settings-label">Block Cursor</span>' +
+        '<button class="settings-toggle' + (s.blockCursor ? ' on' : '') + '" data-toggle="blockCursor"></button></div>' +
         '</div></div>';
 
     overlay.appendChild(panel);
