@@ -206,4 +206,133 @@ auto cancel_query(const Connection& conn, int pid) -> Result<void> {
     return {};
 }
 
+auto terminate_backend(const Connection& conn, int pid) -> Result<void> {
+    auto res = conn.exec_params(
+        "SELECT pg_terminate_backend($1)", pid
+    );
+    if (!res) return std::unexpected(res.error());
+    return {};
+}
+
+auto server_settings(const Connection& conn, std::string_view search) -> Result<std::vector<PgSetting>> {
+    std::string sql;
+    if (search.empty()) {
+        sql = "SELECT name, setting, COALESCE(unit, ''), category, short_desc, "
+              "source, boot_val, reset_val, context "
+              "FROM pg_settings "
+              "ORDER BY category, name";
+    } else {
+        sql = std::format(
+            "SELECT name, setting, COALESCE(unit, ''), category, short_desc, "
+            "source, boot_val, reset_val, context "
+            "FROM pg_settings "
+            "WHERE name ILIKE '%{}%' OR category ILIKE '%{}%' OR short_desc ILIKE '%{}%' "
+            "ORDER BY category, name",
+            search, search, search
+        );
+    }
+
+    auto res = conn.exec(sql);
+    if (!res) return std::unexpected(res.error());
+
+    std::vector<PgSetting> settings;
+    for (auto row : *res) {
+        settings.push_back({
+            .name = std::string(row[0]),
+            .setting = std::string(row[1]),
+            .unit = std::string(row[2]),
+            .category = std::string(row[3]),
+            .short_desc = std::string(row[4]),
+            .source = std::string(row[5]),
+            .boot_val = std::string(row[6]),
+            .reset_val = std::string(row[7]),
+            .context = std::string(row[8]),
+        });
+    }
+    return settings;
+}
+
+auto setting_categories(const Connection& conn) -> Result<std::vector<std::string>> {
+    auto res = conn.exec(
+        "SELECT DISTINCT category FROM pg_settings ORDER BY category"
+    );
+    if (!res) return std::unexpected(res.error());
+
+    std::vector<std::string> categories;
+    for (auto row : *res) {
+        categories.push_back(std::string(row[0]));
+    }
+    return categories;
+}
+
+auto explain_query(const Connection& conn, std::string_view sql, bool analyze) -> Result<ExplainResult> {
+    auto explain_sql = std::format("EXPLAIN (FORMAT TEXT, COSTS, VERBOSE, BUFFERS{}) {}",
+                                    analyze ? ", ANALYZE, TIMING" : "", sql);
+    auto res = conn.exec(explain_sql);
+    if (!res) return std::unexpected(res.error());
+
+    ExplainResult result{};
+    for (int i = 0; i < res->row_count(); ++i) {
+        if (i > 0) result.plan_text += "\n";
+        result.plan_text += std::string(res->get(i, 0));
+    }
+
+    // Try to extract timing from ANALYZE output
+    if (analyze) {
+        // Planning Time and Execution Time are in the last rows
+        auto plan = result.plan_text;
+        if (auto pos = plan.find("Planning Time:"); pos != std::string::npos) {
+            try { result.planning_time = std::stod(plan.substr(pos + 15)); } catch (...) {}
+        }
+        if (auto pos = plan.find("Execution Time:"); pos != std::string::npos) {
+            try { result.execution_time = std::stod(plan.substr(pos + 16)); } catch (...) {}
+        }
+    }
+
+    // Extract total cost from first line
+    auto& plan = result.plan_text;
+    if (auto pos = plan.find("cost="); pos != std::string::npos) {
+        auto dots = plan.find("..", pos + 5);
+        if (dots != std::string::npos) {
+            auto end = plan.find(' ', dots + 2);
+            try { result.total_cost = std::stod(plan.substr(dots + 2, end - dots - 2)); } catch (...) {}
+        }
+    }
+
+    return result;
+}
+
+auto database_activity(const Connection& conn) -> Result<std::vector<DbActivitySummary>> {
+    auto res = conn.exec(
+        "SELECT d.datname, "
+        "COUNT(*) FILTER (WHERE a.state = 'active'), "
+        "COUNT(*) FILTER (WHERE a.state = 'idle'), "
+        "COUNT(*) FILTER (WHERE a.state = 'idle in transaction'), "
+        "COALESCE(s.xact_commit, 0), "
+        "COALESCE(s.xact_rollback, 0), "
+        "pg_size_pretty(pg_database_size(d.datname)) "
+        "FROM pg_database d "
+        "LEFT JOIN pg_stat_activity a ON a.datname = d.datname AND a.backend_type = 'client backend' "
+        "LEFT JOIN pg_stat_database s ON s.datname = d.datname "
+        "WHERE d.datallowconn = true "
+        "GROUP BY d.datname, s.xact_commit, s.xact_rollback "
+        "ORDER BY d.datname"
+    );
+    if (!res) return std::unexpected(res.error());
+
+    std::vector<DbActivitySummary> summaries;
+    for (auto row : *res) {
+        summaries.push_back({
+            .database = std::string(row[0]),
+            .active = static_cast<int>(res->get_int(row.index(), 1).value_or(0)),
+            .idle = static_cast<int>(res->get_int(row.index(), 2).value_or(0)),
+            .idle_in_transaction = static_cast<int>(res->get_int(row.index(), 3).value_or(0)),
+            .xact_commit = res->get_int(row.index(), 4).value_or(0),
+            .xact_rollback = res->get_int(row.index(), 5).value_or(0),
+            .size = std::string(row[6]),
+        });
+    }
+    return summaries;
+}
+
 } // namespace getgresql::pg

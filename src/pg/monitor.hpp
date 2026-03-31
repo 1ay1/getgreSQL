@@ -76,6 +76,35 @@ struct TableStats {
     std::string last_analyze;
 };
 
+struct PgSetting {
+    std::string name;
+    std::string setting;
+    std::string unit;
+    std::string category;
+    std::string short_desc;
+    std::string source;       // "default", "configuration file", etc.
+    std::string boot_val;
+    std::string reset_val;
+    std::string context;      // "postmaster", "sighup", "superuser", "user"
+};
+
+struct ExplainResult {
+    std::string plan_text;     // the full EXPLAIN output as text
+    double planning_time;      // ms, only if ANALYZE
+    double execution_time;     // ms, only if ANALYZE
+    double total_cost;
+};
+
+struct DbActivitySummary {
+    std::string database;
+    int active;
+    int idle;
+    int idle_in_transaction;
+    long long xact_commit;
+    long long xact_rollback;
+    std::string size;
+};
+
 // ─── Monitor queries ────────────────────────────────────────────────
 
 auto server_stats(const Connection& conn) -> Result<ServerStats>;
@@ -86,5 +115,18 @@ auto table_stats(const Connection& conn, std::string_view schema = "public") -> 
 
 // Cancel a running query by backend PID
 auto cancel_query(const Connection& conn, int pid) -> Result<void>;
+
+// Terminate a backend by PID
+auto terminate_backend(const Connection& conn, int pid) -> Result<void>;
+
+// Server configuration settings
+auto server_settings(const Connection& conn, std::string_view search = "") -> Result<std::vector<PgSetting>>;
+auto setting_categories(const Connection& conn) -> Result<std::vector<std::string>>;
+
+// Query plan analysis
+auto explain_query(const Connection& conn, std::string_view sql, bool analyze = false) -> Result<ExplainResult>;
+
+// Per-database activity summary
+auto database_activity(const Connection& conn) -> Result<std::vector<DbActivitySummary>>;
 
 } // namespace getgresql::pg

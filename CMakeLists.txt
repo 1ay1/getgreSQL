@@ -21,6 +21,8 @@ add_executable(getgresql
     src/api/handlers_db.cpp
     src/api/handlers_query.cpp
     src/api/handlers_monitor.cpp
+    src/api/handlers_admin.cpp
+    src/api/handlers_tree.cpp
     src/api/handlers_static.cpp
     src/config/config.cpp
 )
@@ -42,6 +44,7 @@ add_custom_command(
     DEPENDS
         ${CMAKE_SOURCE_DIR}/assets/css/style.css
         ${CMAKE_SOURCE_DIR}/assets/js/app.js
+        ${CMAKE_SOURCE_DIR}/assets/js/editor.js
     COMMENT "Embedding static assets"
 )
 add_custom_target(embed_assets DEPENDS ${CMAKE_BINARY_DIR}/generated/embedded_assets.hpp)

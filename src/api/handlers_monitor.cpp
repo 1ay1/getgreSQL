@@ -9,12 +9,12 @@ namespace getgresql::api {
 auto MonitorPageHandler::handle(Request& req, AppContext& /*ctx*/) -> Response {
     std::string content = R"(
 <div id="monitor-stats" hx-get="/monitor/stats" hx-trigger="load, every 3s" hx-swap="innerHTML">
-    <div class="loading">Loading stats…</div>
+    <div class="loading">Loading stats...</div>
 </div>
 
 <h3>Active Queries</h3>
 <div id="monitor-activity" hx-get="/monitor/activity" hx-trigger="load, every 3s" hx-swap="innerHTML">
-    <div class="loading">Loading…</div>
+    <div class="loading">Loading...</div>
 </div>
 )";
 
@@ -39,7 +39,7 @@ auto MonitorStatsHandler::handle(Request& /*req*/, AppContext& ctx) -> Response 
                                s.waiting_connections > 0 ? "warning" : "");
     content += html::stat_card("Cache Hit",
         std::format("{:.1f}%", s.cache_hit_ratio * 100),
-        s.cache_hit_ratio < 0.90 ? "danger" : "");
+        s.cache_hit_ratio < 0.90 ? "danger" : "success");
     content += html::stat_card("Max Connections", std::to_string(s.max_connections));
     content += html::stat_card("Commits", std::to_string(s.total_commits));
     content += html::stat_card("Rollbacks", std::to_string(s.total_rollbacks),
@@ -63,7 +63,7 @@ auto MonitorActivityHandler::handle(Request& /*req*/, AppContext& ctx) -> Respon
     std::string content;
     content += html::table_begin({
         {"PID", "num"}, {"Database", ""}, {"User", ""}, {"State", ""},
-        {"Duration", "num"}, {"Wait", ""}, {"Query", "wide"}, {"", ""}
+        {"Duration", "num"}, {"Wait", ""}, {"Query", "wide"}, {"", ""}, {"", ""}
     });
 
     for (auto& a : *activity) {
@@ -72,7 +72,7 @@ auto MonitorActivityHandler::handle(Request& /*req*/, AppContext& ctx) -> Respon
                            : "secondary";
 
         auto query_preview = a.query.size() > 120
-            ? html::escape(a.query.substr(0, 120)) + "…"
+            ? html::escape(a.query.substr(0, 120)) + "..."
             : html::escape(a.query);
 
         std::string cancel_btn;
@@ -83,16 +83,25 @@ auto MonitorActivityHandler::handle(Request& /*req*/, AppContext& ctx) -> Respon
             );
         }
 
+        std::string terminate_btn;
+        if (a.state == "active" || a.state == "idle in transaction") {
+            terminate_btn = std::format(
+                R"(<button class="btn btn-sm btn-danger" hx-post="/monitor/terminate/{}" hx-confirm="Force terminate PID {}?">Kill</button>)",
+                a.pid, a.pid
+            );
+        }
+
         content += html::table_row({
             std::to_string(a.pid),
             html::escape(a.database),
             html::escape(a.user),
             html::badge(a.state, state_variant),
             html::escape(a.duration),
-            a.wait_event.empty() ? std::string("—")
+            a.wait_event.empty() ? std::string("&mdash;")
                 : std::format("{}/{}", html::escape(a.wait_event_type), html::escape(a.wait_event)),
             std::format(R"(<code class="query-preview">{}</code>)", query_preview),
             cancel_btn,
+            terminate_btn,
         });
     }
     content += html::table_end();
@@ -120,18 +129,18 @@ auto MonitorLocksHandler::handle(Request& req, AppContext& ctx) -> Response {
             content += html::table_row({
                 std::to_string(l.pid),
                 html::escape(l.database),
-                l.relation.empty() ? "—" : html::escape(l.relation),
+                l.relation.empty() ? "&mdash;" : html::escape(l.relation),
                 html::badge(l.mode, l.granted ? "secondary" : "danger"),
-                l.granted ? "✓" : html::badge("WAITING", "danger"),
-                std::format("<code>{}</code>",
-                    html::escape(l.query.size() > 100 ? l.query.substr(0, 100) + "…" : l.query)),
+                l.granted ? std::string("&#10003;") : html::badge("WAITING", "danger"),
+                std::format("<code class=\"query-preview\">{}</code>",
+                    html::escape(l.query.size() > 100 ? l.query.substr(0, 100) + "..." : l.query)),
             });
         }
         content += html::table_end();
     }
 
     if (req.is_htmx()) return Response::html(html::partial(std::move(content)));
-    return Response::html(html::page("Locks", "Locks", std::move(content)));
+    return Response::html(html::page("Locks", "Monitor", std::move(content)));
 }
 
 auto CancelQueryHandler::handle(Request& req, AppContext& ctx) -> Response {

@@ -25,9 +25,12 @@ auto IndexHandler::handle(Request& /*req*/, AppContext& ctx) -> Response {
         content += "<div class=\"stat-grid\">";
         content += html::stat_card("Active Connections", std::to_string(s.active_connections));
         content += html::stat_card("Idle Connections", std::to_string(s.idle_connections));
-        content += html::stat_card("Cache Hit Ratio", std::format("{:.1f}%", s.cache_hit_ratio * 100));
-        content += html::stat_card("Total Commits", std::to_string(s.total_commits));
-        content += html::stat_card("Total Rollbacks", std::to_string(s.total_rollbacks));
+        content += html::stat_card("Cache Hit Ratio", std::format("{:.1f}%", s.cache_hit_ratio * 100),
+                                   s.cache_hit_ratio < 0.90 ? "danger" : "success");
+        content += html::stat_card("Commits", std::to_string(s.total_commits));
+        content += html::stat_card("Rollbacks", std::to_string(s.total_rollbacks),
+                                   s.total_rollbacks > 0 ? "warning" : "");
+        content += html::stat_card("Max Connections", std::to_string(s.max_connections));
         content += html::stat_card("Uptime", s.uptime, "accent");
         content += "</div>";
 
@@ -37,14 +40,14 @@ auto IndexHandler::handle(Request& /*req*/, AppContext& ctx) -> Response {
     if (dbs_res) {
         content += "<h3>Databases</h3>";
         content += html::table_begin({
-            {"Name", ""}, {"Owner", ""}, {"Encoding", ""}, {"Size", "num"}
+            {"Name", "", true}, {"Owner", "", true}, {"Encoding", "", true}, {"Size", "num", true}
         });
         for (auto& db : *dbs_res) {
             content += html::table_row({
                 std::format("<a href=\"/db/{}/schemas\">{}</a>", html::escape(db.name), html::escape(db.name)),
                 html::escape(db.owner),
                 html::escape(db.encoding),
-                html::escape(db.size),
+                std::format("<a href=\"/db/{}/size\">{}</a>", html::escape(db.name), html::escape(db.size)),
             });
         }
         content += html::table_end();
@@ -56,19 +59,20 @@ auto IndexHandler::handle(Request& /*req*/, AppContext& ctx) -> Response {
 auto DatabaseListHandler::handle(Request& req, AppContext& ctx) -> Response {
     auto conn = ctx.pool.checkout();
     if (!conn) {
-        return Response::html(html::page("Databases", "Databases",
+        return Response::html(html::page("Databases", "Dashboard",
             html::alert(error_message(conn.error()), "error")));
     }
 
     auto dbs = pg::list_databases(conn->get());
     if (!dbs) {
-        return Response::html(html::page("Databases", "Databases",
+        return Response::html(html::page("Databases", "Dashboard",
             html::alert(error_message(dbs.error()), "error")));
     }
 
     std::string content;
     content += html::table_begin({
-        {"Name", ""}, {"Owner", ""}, {"Encoding", ""}, {"Size", "num"}, {"Size (bytes)", "num"}
+        {"Name", "", true}, {"Owner", "", true}, {"Encoding", "", true},
+        {"Size", "num", true}, {"Size (bytes)", "num", true}
     });
 
     for (auto& db : *dbs) {
@@ -83,7 +87,7 @@ auto DatabaseListHandler::handle(Request& req, AppContext& ctx) -> Response {
     content += html::table_end();
 
     if (req.is_htmx()) return Response::html(html::partial(std::move(content)));
-    return Response::html(html::page("Databases", "Databases", std::move(content)));
+    return Response::html(html::page("Databases", "Dashboard", std::move(content)));
 }
 
 auto SchemaListHandler::handle(Request& req, AppContext& ctx) -> Response {
@@ -101,7 +105,7 @@ auto SchemaListHandler::handle(Request& req, AppContext& ctx) -> Response {
         {std::string(db_name), ""},
     });
 
-    content += html::table_begin({{"Schema", ""}, {"Owner", ""}});
+    content += html::table_begin({{"Schema", "", true}, {"Owner", "", true}});
     for (auto& s : *schemas) {
         content += html::table_row({
             std::format("<a href=\"/db/{}/schema/{}/tables\">{}</a>",
@@ -113,7 +117,7 @@ auto SchemaListHandler::handle(Request& req, AppContext& ctx) -> Response {
 
     auto title = std::format("Schemas - {}", db_name);
     if (req.is_htmx()) return Response::html(html::partial(std::move(content)));
-    return Response::html(html::page(title, "Databases", std::move(content)));
+    return Response::html(html::page(title, "Dashboard", std::move(content)));
 }
 
 auto TableListHandler::handle(Request& req, AppContext& ctx) -> Response {
@@ -133,8 +137,15 @@ auto TableListHandler::handle(Request& req, AppContext& ctx) -> Response {
         {std::string(schema_name), ""},
     });
 
+    content += "<div class=\"schema-nav\">";
+    content += std::format("<a href=\"/db/{}/schema/{}/tables\" class=\"btn btn-sm btn-primary\">Tables</a>", db_name, schema_name);
+    content += std::format("<a href=\"/db/{}/schema/{}/functions\" class=\"btn btn-sm\">Functions</a>", db_name, schema_name);
+    content += std::format("<a href=\"/db/{}/schema/{}/sequences\" class=\"btn btn-sm\">Sequences</a>", db_name, schema_name);
+    content += std::format("<a href=\"/db/{}/schema/{}/indexes\" class=\"btn btn-sm\">Index Analysis</a>", db_name, schema_name);
+    content += "</div>";
+
     content += html::table_begin({
-        {"Table", ""}, {"Type", ""}, {"Rows (est.)", "num"}, {"Size", "num"}
+        {"Table", "", true}, {"Type", "", true}, {"Rows (est.)", "num", true}, {"Size", "num", true}
     });
     for (auto& t : *tables) {
         auto type_badge = t.type == "table" ? std::string("primary") : std::string("secondary");
@@ -151,7 +162,7 @@ auto TableListHandler::handle(Request& req, AppContext& ctx) -> Response {
 
     auto title = std::format("Tables - {}.{}", db_name, schema_name);
     if (req.is_htmx()) return Response::html(html::partial(std::move(content)));
-    return Response::html(html::page(title, "Databases", std::move(content)));
+    return Response::html(html::page(title, "Dashboard", std::move(content)));
 }
 
 auto TableDetailHandler::handle(Request& req, AppContext& ctx) -> Response {
@@ -170,12 +181,12 @@ auto TableDetailHandler::handle(Request& req, AppContext& ctx) -> Response {
         {std::string(table_name), ""},
     });
 
-    // Tabs
+    // Section tabs
     auto data_url = std::format("/db/{}/schema/{}/table/{}/data", db_name, schema_name, table_name);
-    content += "<div class=\"tabs\">";
-    content += "<button class=\"tab active\">Columns</button>";
+    content += "<div class=\"section-tabs\">";
+    content += "<button class=\"section-tab active\">Columns</button>";
     content += std::format(
-        "<button class=\"tab\" hx-get=\"{}\" hx-target=\"#tab-content\" hx-swap=\"innerHTML\""
+        "<button class=\"section-tab\" hx-get=\"{}\" hx-target=\"#tab-content\" hx-swap=\"innerHTML\""
         " onclick=\"this.parentElement.querySelector('.active')?.classList.remove('active'); this.classList.add('active')\">Data</button>",
         data_url);
     content += "</div>";
@@ -245,7 +256,7 @@ auto TableDetailHandler::handle(Request& req, AppContext& ctx) -> Response {
 
     auto title = std::format("{}.{}", schema_name, table_name);
     if (req.is_htmx()) return Response::html(html::partial(std::move(content)));
-    return Response::html(html::page(title, "Databases", std::move(content)));
+    return Response::html(html::page(title, "Dashboard", std::move(content)));
 }
 
 auto TableDataHandler::handle(Request& req, AppContext& ctx) -> Response {
@@ -268,9 +279,12 @@ auto TableDataHandler::handle(Request& req, AppContext& ctx) -> Response {
 
     std::string content;
 
+    content += std::format("<div class=\"query-info\"><span class=\"rows-badge\">{} rows</span> <span class=\"time-badge\">limit {}</span></div>",
+                           result->row_count(), limit);
+
     std::vector<html::TableColumn> headers;
     for (int c = 0; c < result->col_count(); ++c) {
-        headers.push_back({std::string(result->column_name(c)), ""});
+        headers.push_back({std::string(result->column_name(c)), "", true});
     }
     content += html::table_begin(headers);
 
@@ -291,9 +305,6 @@ auto TableDataHandler::handle(Request& req, AppContext& ctx) -> Response {
         content += html::table_row(cells);
     }
     content += html::table_end();
-
-    content += std::format("<div class=\"table-info\">Showing {} rows (limit {})</div>",
-                           result->row_count(), limit);
 
     return Response::html(html::partial(std::move(content)));
 }
