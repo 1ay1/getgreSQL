@@ -458,6 +458,259 @@ auto preview_rows(const Connection& conn, std::string_view schema,
     return conn.exec(sql);
 }
 
+// ─── DDL Generation ─────────────────────────────────────────────────
+
+auto table_ddl(const Connection& conn, std::string_view schema, std::string_view table) -> Result<std::string> {
+    std::string ddl;
+
+    // Column definitions
+    auto col_sql = std::format(
+        "SELECT column_name, data_type, character_maximum_length, "
+        "is_nullable, column_default, "
+        "CASE WHEN udt_name LIKE 'int%' THEN udt_name "
+        "     WHEN data_type = 'character varying' THEN 'varchar(' || character_maximum_length || ')' "
+        "     WHEN data_type = 'character' THEN 'char(' || character_maximum_length || ')' "
+        "     WHEN data_type = 'numeric' THEN 'numeric(' || COALESCE(numeric_precision::text,'') || ',' || COALESCE(numeric_scale::text,'') || ')' "
+        "     WHEN data_type = 'ARRAY' THEN udt_name "
+        "     WHEN data_type = 'USER-DEFINED' THEN udt_name "
+        "     ELSE data_type END AS col_type "
+        "FROM information_schema.columns "
+        "WHERE table_schema = '{}' AND table_name = '{}' "
+        "ORDER BY ordinal_position",
+        schema, table
+    );
+    auto cols = conn.exec(col_sql);
+    if (!cols) return std::unexpected(cols.error());
+
+    ddl += std::format("CREATE TABLE \"{}\".\"{}\" (\n", schema, table);
+    for (int i = 0; auto row : *cols) {
+        if (i > 0) ddl += ",\n";
+        ddl += std::format("    \"{}\" {}", std::string(row[0]), std::string(row[5]));
+        if (std::string(row[3]) == "NO") ddl += " NOT NULL";
+        auto def = std::string(row[4]);
+        if (!def.empty()) ddl += std::format(" DEFAULT {}", def);
+        ++i;
+    }
+
+    // Primary key
+    auto pk_sql = std::format(
+        "SELECT string_agg(a.attname, ', ' ORDER BY array_position(i.indkey, a.attnum)) "
+        "FROM pg_index i "
+        "JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) "
+        "WHERE i.indrelid = '\"{}\".\"{}\"\t'::regclass AND i.indisprimary",
+        schema, table
+    );
+    auto pk = conn.exec(pk_sql);
+    if (pk && pk->row_count() > 0 && !pk->is_null(0, 0)) {
+        ddl += std::format(",\n    PRIMARY KEY ({})", pk->get(0, 0));
+    }
+
+    // Unique constraints
+    auto uq_sql = std::format(
+        "SELECT conname, pg_get_constraintdef(oid) "
+        "FROM pg_constraint "
+        "WHERE conrelid = '\"{}\".\"{}\"\t'::regclass AND contype = 'u'",
+        schema, table
+    );
+    auto uqs = conn.exec(uq_sql);
+    if (uqs) {
+        for (auto row : *uqs) {
+            ddl += std::format(",\n    CONSTRAINT \"{}\" {}", std::string(row[0]), std::string(row[1]));
+        }
+    }
+
+    // Foreign keys
+    auto fk_sql = std::format(
+        "SELECT conname, pg_get_constraintdef(oid) "
+        "FROM pg_constraint "
+        "WHERE conrelid = '\"{}\".\"{}\"\t'::regclass AND contype = 'f'",
+        schema, table
+    );
+    auto fks = conn.exec(fk_sql);
+    if (fks) {
+        for (auto row : *fks) {
+            ddl += std::format(",\n    CONSTRAINT \"{}\" {}", std::string(row[0]), std::string(row[1]));
+        }
+    }
+
+    // Check constraints
+    auto ck_sql = std::format(
+        "SELECT conname, pg_get_constraintdef(oid) "
+        "FROM pg_constraint "
+        "WHERE conrelid = '\"{}\".\"{}\"\t'::regclass AND contype = 'c'",
+        schema, table
+    );
+    auto cks = conn.exec(ck_sql);
+    if (cks) {
+        for (auto row : *cks) {
+            ddl += std::format(",\n    CONSTRAINT \"{}\" {}", std::string(row[0]), std::string(row[1]));
+        }
+    }
+
+    ddl += "\n);\n";
+
+    // Indexes (non-primary, non-unique-constraint)
+    auto idx_sql = std::format(
+        "SELECT indexdef FROM pg_indexes "
+        "WHERE schemaname = '{}' AND tablename = '{}' "
+        "AND indexname NOT IN ("
+        "  SELECT conname FROM pg_constraint "
+        "  WHERE conrelid = '\"{}\".\"{}\"\t'::regclass AND contype IN ('p','u')"
+        ")",
+        schema, table, schema, table
+    );
+    auto idxs = conn.exec(idx_sql);
+    if (idxs) {
+        for (auto row : *idxs) {
+            ddl += std::format("\n{};\n", std::string(row[0]));
+        }
+    }
+
+    // Table and column comments
+    auto comment_sql = std::format(
+        "SELECT obj_description(c.oid) FROM pg_class c "
+        "JOIN pg_namespace n ON n.oid = c.relnamespace "
+        "WHERE n.nspname = '{}' AND c.relname = '{}'",
+        schema, table
+    );
+    auto tcmt = conn.exec(comment_sql);
+    if (tcmt && tcmt->row_count() > 0 && !tcmt->is_null(0, 0)) {
+        auto cmt = std::string(tcmt->get(0, 0));
+        if (!cmt.empty()) {
+            // Escape single quotes in comment
+            std::string escaped;
+            for (char c : cmt) {
+                if (c == '\'') escaped += "''";
+                else escaped += c;
+            }
+            ddl += std::format("\nCOMMENT ON TABLE \"{}\".\"{}\" IS '{}';\n", schema, table, escaped);
+        }
+    }
+
+    return ddl;
+}
+
+// ─── Column Statistics ──────────────────────────────────────────────
+
+auto column_statistics(const Connection& conn, std::string_view schema,
+                        std::string_view table) -> Result<std::vector<ColumnStats>> {
+    auto sql = std::format(
+        "SELECT s.attname, "
+        "COALESCE(c.data_type, 'unknown') AS data_type, "
+        "s.null_frac, s.n_distinct, s.avg_width, "
+        "s.most_common_vals::text, s.most_common_freqs::text, "
+        "s.histogram_bounds::text, s.correlation "
+        "FROM pg_stats s "
+        "LEFT JOIN information_schema.columns c "
+        "  ON c.table_schema = s.schemaname AND c.table_name = s.tablename "
+        "  AND c.column_name = s.attname "
+        "WHERE s.schemaname = '{}' AND s.tablename = '{}' "
+        "ORDER BY s.attname",
+        schema, table
+    );
+
+    auto res = conn.exec(sql);
+    if (!res) return std::unexpected(res.error());
+
+    std::vector<ColumnStats> stats;
+    for (auto row : *res) {
+        stats.push_back({
+            .column_name = std::string(row[0]),
+            .data_type = std::string(row[1]),
+            .null_fraction = res->get_double(row.index(), 2).value_or(0.0),
+            .n_distinct = res->get_int(row.index(), 3).value_or(0),
+            .avg_width = static_cast<int>(res->get_int(row.index(), 4).value_or(0)),
+            .most_common_vals = row.is_null(5) ? std::string() : std::string(row[5]),
+            .most_common_freqs = row.is_null(6) ? std::string() : std::string(row[6]),
+            .histogram_bounds = row.is_null(7) ? std::string() : std::string(row[7]),
+            .correlation = res->get_double(row.index(), 8).value_or(0.0),
+        });
+    }
+    return stats;
+}
+
+// ─── Schema ERD ─────────────────────────────────────────────────────
+
+auto schema_erd(const Connection& conn, std::string_view schema) -> Result<ERDData> {
+    ERDData erd;
+
+    // Tables with columns
+    auto tbl_sql = std::format(
+        "SELECT c.table_name, "
+        "CASE WHEN t.table_type = 'VIEW' THEN 'view' ELSE 'table' END, "
+        "c.column_name, "
+        "CASE WHEN c.data_type = 'USER-DEFINED' THEN c.udt_name "
+        "     WHEN c.data_type = 'character varying' THEN 'varchar' "
+        "     WHEN c.data_type = 'ARRAY' THEN c.udt_name "
+        "     ELSE c.data_type END "
+        "FROM information_schema.columns c "
+        "JOIN information_schema.tables t ON t.table_schema = c.table_schema AND t.table_name = c.table_name "
+        "WHERE c.table_schema = '{}' "
+        "ORDER BY c.table_name, c.ordinal_position",
+        schema
+    );
+    auto tbls = conn.exec(tbl_sql);
+    if (!tbls) return std::unexpected(tbls.error());
+
+    std::string current_table;
+    for (auto row : *tbls) {
+        auto tname = std::string(row[0]);
+        if (tname != current_table) {
+            erd.tables.push_back({.name = tname, .type = std::string(row[1]), .columns = {}});
+            current_table = tname;
+        }
+        erd.tables.back().columns.emplace_back(std::string(row[2]), std::string(row[3]));
+    }
+
+    // Foreign key relationships
+    auto fk_sql = std::format(
+        "SELECT tc.constraint_name, tc.table_name AS source, "
+        "string_agg(DISTINCT kcu.column_name, ', ') AS source_cols, "
+        "ccu.table_name AS target, "
+        "string_agg(DISTINCT ccu.column_name, ', ') AS target_cols "
+        "FROM information_schema.table_constraints tc "
+        "JOIN information_schema.key_column_usage kcu "
+        "  ON kcu.constraint_name = tc.constraint_name AND kcu.table_schema = tc.table_schema "
+        "JOIN information_schema.constraint_column_usage ccu "
+        "  ON ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema "
+        "WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = '{}' "
+        "GROUP BY tc.constraint_name, tc.table_name, ccu.table_name",
+        schema
+    );
+    auto fks = conn.exec(fk_sql);
+    if (!fks) return std::unexpected(fks.error());
+
+    for (auto row : *fks) {
+        erd.relationships.push_back({
+            .constraint_name = std::string(row[0]),
+            .source_table = std::string(row[1]),
+            .source_columns = std::string(row[2]),
+            .target_table = std::string(row[3]),
+            .target_columns = std::string(row[4]),
+        });
+    }
+
+    return erd;
+}
+
+// ─── Quick Actions ──────────────────────────────────────────────────
+
+auto vacuum_table(const Connection& conn, std::string_view schema,
+                   std::string_view table) -> Result<bool> {
+    auto sql = std::format("VACUUM \"{}\".\"{}\"\t", schema, table);
+    auto res = conn.exec(sql);
+    if (!res) return std::unexpected(res.error());
+    return true;
+}
+
+auto analyze_table(const Connection& conn, std::string_view schema,
+                    std::string_view table) -> Result<bool> {
+    auto sql = std::format("ANALYZE \"{}\".\"{}\"\t", schema, table);
+    auto res = conn.exec(sql);
+    if (!res) return std::unexpected(res.error());
+    return true;
+}
+
 auto completion_metadata(const Connection& conn) -> Result<CompletionData> {
     // Get schemas
     auto schema_res = conn.exec(

@@ -16,45 +16,96 @@ function toggleTheme() {
 
 // ─── Tree View ───────────────────────────────────────────────────────────
 
+var TREE_STATE_KEY = 'getgresql_tree_state';
+
+function treeGetSavedState() {
+    try { return JSON.parse(sessionStorage.getItem(TREE_STATE_KEY) || '[]'); }
+    catch(e) { return []; }
+}
+
+function treeSaveState() {
+    var expanded = [];
+    document.querySelectorAll('.tree-children.loaded').forEach(function(el) {
+        if (el.style.display !== 'none') {
+            var url = el.getAttribute('hx-get');
+            if (url) expanded.push(url);
+        }
+    });
+    sessionStorage.setItem(TREE_STATE_KEY, JSON.stringify(expanded));
+}
+
 function treeToggle(el) {
-    const item = el.closest('.tree-item');
+    var item = el.closest('.tree-item');
     if (!item) return;
-    const children = item.querySelector('.tree-children');
-    const chevron = el.querySelector('.tree-chevron');
+    var children = item.querySelector('.tree-children');
+    var chevron = el.querySelector('.tree-chevron');
     if (!children || !chevron) return;
 
     if (children.classList.contains('loaded')) {
-        // Already loaded, just toggle visibility
-        const isHidden = children.style.display === 'none';
+        var isHidden = children.style.display === 'none';
         children.style.display = isHidden ? '' : 'none';
         chevron.classList.toggle('expanded', isHidden);
+        treeSaveState();
     }
-    // If not loaded, htmx will handle loading and we just need to expand
+    // If not loaded, htmx will handle loading — state saved in afterSwap
 }
 
-// After htmx loads tree children, mark as loaded and expand
+// After htmx loads tree children, mark as loaded, expand, and auto-restore nested state
 document.addEventListener('htmx:afterSwap', function(e) {
     if (e.detail.target.classList && e.detail.target.classList.contains('tree-children')) {
         e.detail.target.classList.add('loaded');
         e.detail.target.style.display = '';
-        // Expand the chevron
-        const item = e.detail.target.closest('.tree-item');
+        var item = e.detail.target.closest('.tree-item');
         if (item) {
-            const chevron = item.querySelector('.tree-chevron');
+            var chevron = item.querySelector('.tree-chevron');
             if (chevron) chevron.classList.add('expanded');
+        }
+        treeSaveState();
+
+        // Auto-expand child nodes that were previously open
+        var saved = treeGetSavedState();
+        if (saved.length > 0) {
+            e.detail.target.querySelectorAll('.tree-children[hx-get]').forEach(function(child) {
+                var url = child.getAttribute('hx-get');
+                if (saved.indexOf(url) !== -1) {
+                    // Trigger expansion by clicking the parent row
+                    var parentRow = child.closest('.tree-item');
+                    if (parentRow) {
+                        var row = parentRow.querySelector(':scope > .tree-row');
+                        if (row) row.click();
+                    }
+                }
+            });
         }
     }
 });
 
-// Tree row selection highlight
+// Highlight the tree row matching the current URL
+function treeHighlightCurrent() {
+    var path = window.location.pathname;
+    document.querySelectorAll('.tree-row.selected').forEach(function(el) {
+        el.classList.remove('selected');
+    });
+    document.querySelectorAll('.tree-row[href]').forEach(function(el) {
+        if (el.getAttribute('href') === path) {
+            el.classList.add('selected');
+        }
+    });
+}
+
+// Tree row selection highlight on click
 document.addEventListener('click', function(e) {
     var row = e.target.closest('.tree-row');
     if (!row) return;
-    // Remove previous selection
     document.querySelectorAll('.tree-row.selected').forEach(function(el) {
         el.classList.remove('selected');
     });
     row.classList.add('selected');
+});
+
+// Highlight current page in tree after any htmx swap
+document.addEventListener('htmx:afterSettle', function() {
+    treeHighlightCurrent();
 });
 
 // ─── Sidebar Resize ──────────────────────────────────────────────────────
@@ -355,3 +406,391 @@ document.addEventListener('keydown', function(e) {
 function toggleSidebar() {
     document.querySelector('.ide').classList.toggle('sidebar-collapsed');
 }
+
+// ─── Inline Cell Editing ─────────────────────────────────────────────────
+
+function editCell(span) {
+    if (span.querySelector('input')) return; // already editing
+
+    var currentValue = span.textContent;
+    var col = span.getAttribute('data-col');
+    var schema = span.getAttribute('data-schema');
+    var table = span.getAttribute('data-table');
+    var db = span.getAttribute('data-db');
+    var where = span.getAttribute('data-where');
+
+    var input = document.createElement('input');
+    input.type = 'text';
+    input.value = currentValue;
+    input.className = 'cell-edit-input';
+    span.textContent = '';
+    span.appendChild(input);
+    input.focus();
+    input.select();
+
+    function commit() {
+        var newValue = input.value;
+        if (newValue === currentValue) {
+            span.textContent = currentValue;
+            return;
+        }
+        // Send update
+        fetch('/db/' + db + '/schema/' + schema + '/table/' + table + '/update-cell', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: 'col=' + encodeURIComponent(col) + '&val=' + encodeURIComponent(newValue) + '&where=' + encodeURIComponent(where)
+        }).then(function(r) { return r.json(); }).then(function(data) {
+            if (data.error) {
+                span.textContent = currentValue;
+                alert('Update failed: ' + data.error);
+            } else {
+                span.textContent = newValue;
+                span.classList.add('cell-updated');
+                setTimeout(function() { span.classList.remove('cell-updated'); }, 1500);
+            }
+        }).catch(function() {
+            span.textContent = currentValue;
+        });
+    }
+
+    input.addEventListener('blur', commit);
+    input.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+        if (e.key === 'Escape') { span.textContent = currentValue; }
+    });
+}
+
+// ─── Export Results (CSV / JSON / SQL INSERT) ────────────────────────────
+
+function exportResults(format) {
+    var table = document.querySelector('.query-results table');
+    if (!table) { alert('No results to export'); return; }
+
+    var headers = [];
+    table.querySelectorAll('thead th').forEach(function(th) {
+        headers.push(th.textContent.trim());
+    });
+
+    var rows = [];
+    table.querySelectorAll('tbody tr').forEach(function(tr) {
+        var row = [];
+        tr.querySelectorAll('td').forEach(function(td) {
+            var nullEl = td.querySelector('.null-value');
+            row.push(nullEl ? null : td.textContent.trim());
+        });
+        rows.push(row);
+    });
+
+    var content, filename, mime;
+
+    if (format === 'csv') {
+        var csvEsc = function(v) {
+            if (v === null) return '';
+            if (v.indexOf(',') !== -1 || v.indexOf('"') !== -1 || v.indexOf('\n') !== -1) {
+                return '"' + v.replace(/"/g, '""') + '"';
+            }
+            return v;
+        };
+        content = headers.map(csvEsc).join(',') + '\n';
+        rows.forEach(function(r) { content += r.map(csvEsc).join(',') + '\n'; });
+        filename = 'export.csv';
+        mime = 'text/csv';
+    } else if (format === 'json') {
+        var data = rows.map(function(r) {
+            var obj = {};
+            headers.forEach(function(h, i) { obj[h] = r[i]; });
+            return obj;
+        });
+        content = JSON.stringify(data, null, 2);
+        filename = 'export.json';
+        mime = 'application/json';
+    } else if (format === 'sql') {
+        content = '';
+        rows.forEach(function(r) {
+            var vals = r.map(function(v) {
+                if (v === null) return 'NULL';
+                return "'" + v.replace(/'/g, "''") + "'";
+            });
+            content += 'INSERT INTO table_name (' + headers.join(', ') + ') VALUES (' + vals.join(', ') + ');\n';
+        });
+        filename = 'export.sql';
+        mime = 'text/sql';
+    }
+
+    var blob = new Blob([content], { type: mime });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(a.href);
+}
+
+// ─── Visual EXPLAIN Renderer ─────────────────────────────────────────────
+
+function parseExplainPlan(text) {
+    if (!text) return null;
+    var lines = text.split('\n').filter(function(l) { return l.trim(); });
+    var nodes = [];
+    var stack = [{ children: nodes, indent: -1 }];
+
+    lines.forEach(function(line) {
+        var indent = 0;
+        var trimmed = line;
+        // Count leading spaces and ->
+        var m = line.match(/^(\s*)(->)?\s*/);
+        if (m) {
+            indent = m[0].length;
+            trimmed = line.substring(m[0].length);
+        }
+
+        // Parse node: "Type on table  (cost=X..Y rows=N width=W) (actual time=A..B rows=R loops=L)"
+        var node = { text: trimmed, indent: indent, children: [], type: '', table: '', cost: 0, rows: 0, actual_time: 0, actual_rows: 0, width: 0, loops: 1, extra: '' };
+
+        var costMatch = trimmed.match(/\(cost=([0-9.]+)\.\.([0-9.]+)\s+rows=(\d+)\s+width=(\d+)\)/);
+        if (costMatch) {
+            node.cost = parseFloat(costMatch[2]);
+            node.rows = parseInt(costMatch[3]);
+            node.width = parseInt(costMatch[4]);
+        }
+        var actualMatch = trimmed.match(/\(actual time=([0-9.]+)\.\.([0-9.]+)\s+rows=(\d+)\s+loops=(\d+)\)/);
+        if (actualMatch) {
+            node.actual_time = parseFloat(actualMatch[2]);
+            node.actual_rows = parseInt(actualMatch[3]);
+            node.loops = parseInt(actualMatch[4]);
+        }
+        var typeMatch = trimmed.match(/^(\S[\w\s]*?)(?:\s+on\s+(\S+)|\s+using\s+(\S+))?\s*\(/);
+        if (typeMatch) {
+            node.type = typeMatch[1].trim();
+            node.table = typeMatch[2] || typeMatch[3] || '';
+        } else {
+            // Sub-plan info like "Filter:", "Sort Key:", etc.
+            node.type = trimmed.replace(/\(.*$/, '').trim();
+        }
+
+        // Place in tree based on indent
+        while (stack.length > 1 && stack[stack.length - 1].indent >= indent) {
+            stack.pop();
+        }
+        stack[stack.length - 1].children.push(node);
+        stack.push(node);
+    });
+
+    return nodes;
+}
+
+function renderExplainTree(nodes, maxCost) {
+    if (!nodes || !nodes.length) return '';
+    if (!maxCost) {
+        maxCost = 0;
+        (function findMax(ns) { ns.forEach(function(n) { if (n.cost > maxCost) maxCost = n.cost; findMax(n.children); }); })(nodes);
+        if (maxCost === 0) maxCost = 1;
+    }
+
+    var html = '';
+    nodes.forEach(function(node) {
+        if (!node.type) return;
+        var costPct = Math.min(100, (node.cost / maxCost) * 100);
+        var costColor = costPct > 80 ? 'var(--danger)' : costPct > 40 ? 'var(--warning)' : 'var(--success)';
+
+        html += '<div class="explain-node">';
+        html += '<div class="explain-node-header">';
+        html += '<span class="explain-node-type">' + node.type + '</span>';
+        if (node.table) html += ' <span class="explain-node-table">on ' + node.table + '</span>';
+        html += '</div>';
+        html += '<div class="explain-node-stats">';
+        if (node.cost > 0) {
+            html += '<div class="explain-cost-bar"><div class="explain-cost-fill" style="width:' + costPct.toFixed(1) + '%;background:' + costColor + '"></div></div>';
+            html += '<span class="explain-stat">Cost: ' + node.cost.toFixed(1) + '</span>';
+        }
+        if (node.rows > 0) html += '<span class="explain-stat">Rows: ' + node.rows + '</span>';
+        if (node.actual_time > 0) html += '<span class="explain-stat">Time: ' + node.actual_time.toFixed(3) + 'ms</span>';
+        if (node.actual_rows > 0) html += '<span class="explain-stat">Actual: ' + node.actual_rows + '</span>';
+        if (node.loops > 1) html += '<span class="explain-stat">Loops: ' + node.loops + '</span>';
+        html += '</div>';
+        if (node.children.length > 0) {
+            html += '<div class="explain-children">' + renderExplainTree(node.children, maxCost) + '</div>';
+        }
+        html += '</div>';
+    });
+    return html;
+}
+
+// Auto-render EXPLAIN results
+document.addEventListener('htmx:afterSettle', function() {
+    var plans = document.querySelectorAll('.explain-plan');
+    plans.forEach(function(el) {
+        if (el.dataset.rendered) return;
+        var text = el.textContent;
+        var nodes = parseExplainPlan(text);
+        if (nodes && nodes.length > 0 && nodes[0].cost > 0) {
+            var visual = document.createElement('div');
+            visual.className = 'explain-visual';
+            visual.innerHTML = renderExplainTree(nodes);
+            el.parentElement.insertBefore(visual, el);
+            // Keep original as collapsible
+            el.style.display = 'none';
+            var toggle = document.createElement('button');
+            toggle.className = 'btn btn-sm btn-ghost';
+            toggle.textContent = 'Show Raw Plan';
+            toggle.onclick = function() {
+                el.style.display = el.style.display === 'none' ? '' : 'none';
+                toggle.textContent = el.style.display === 'none' ? 'Show Raw Plan' : 'Hide Raw Plan';
+            };
+            el.parentElement.insertBefore(toggle, el);
+            el.dataset.rendered = '1';
+        }
+    });
+});
+
+// ─── ERD SVG Renderer ────────────────────────────────────────────────────
+
+function initERD(container) {
+    var url = container.getAttribute('data-url');
+    if (!url) return;
+
+    fetch(url).then(function(r) { return r.json(); }).then(function(data) {
+        if (!data.tables || data.tables.length === 0) {
+            container.innerHTML = '<div class="empty-state">No tables found in this schema</div>';
+            return;
+        }
+        renderERD(container, data);
+    }).catch(function(err) {
+        container.innerHTML = '<div class="alert alert-error">' + err.message + '</div>';
+    });
+}
+
+function renderERD(container, data) {
+    var tables = data.tables;
+    var rels = data.relationships || [];
+
+    // Layout: grid arrangement
+    var cols = Math.ceil(Math.sqrt(tables.length));
+    var boxW = 220, boxH = 0, padX = 40, padY = 40, headerH = 28, rowH = 20, maxRows = 12;
+
+    // Calculate positions
+    var positions = {};
+    tables.forEach(function(t, i) {
+        var col = i % cols;
+        var row = Math.floor(i / cols);
+        var h = headerH + Math.min(t.columns.length, maxRows) * rowH + 8;
+        if (t.columns.length > maxRows) h += rowH; // "... more" row
+        positions[t.name] = { x: col * (boxW + padX) + 20, y: row * (200 + padY) + 20, w: boxW, h: h };
+    });
+
+    // SVG dimensions
+    var svgW = (cols) * (boxW + padX) + 40;
+    var svgH = (Math.ceil(tables.length / cols)) * (200 + padY) + 40;
+
+    var svg = '<svg class="erd-svg" viewBox="0 0 ' + svgW + ' ' + svgH + '" xmlns="http://www.w3.org/2000/svg">';
+
+    // Draw relationship lines first (behind boxes)
+    rels.forEach(function(rel) {
+        var s = positions[rel.source];
+        var t = positions[rel.target];
+        if (!s || !t) return;
+        var sx = s.x + s.w, sy = s.y + s.h / 2;
+        var tx = t.x, ty = t.y + t.h / 2;
+        if (sx > tx) { sx = s.x; tx = t.x + t.w; }
+        var mx = (sx + tx) / 2;
+        svg += '<path d="M' + sx + ',' + sy + ' C' + mx + ',' + sy + ' ' + mx + ',' + ty + ' ' + tx + ',' + ty + '" class="erd-line" />';
+        // Arrow
+        var angle = Math.atan2(ty - sy, tx - sx);
+        svg += '<circle cx="' + tx + '" cy="' + ty + '" r="4" class="erd-arrow" />';
+    });
+
+    // Draw table boxes
+    tables.forEach(function(t) {
+        var pos = positions[t.name];
+        if (!pos) return;
+
+        svg += '<g class="erd-table" transform="translate(' + pos.x + ',' + pos.y + ')">';
+        svg += '<rect x="0" y="0" width="' + pos.w + '" height="' + pos.h + '" rx="4" class="erd-box" />';
+        svg += '<rect x="0" y="0" width="' + pos.w + '" height="' + headerH + '" rx="4" class="erd-header" />';
+        svg += '<rect x="0" y="' + (headerH - 4) + '" width="' + pos.w + '" height="4" class="erd-header" />'; // square bottom corners
+        svg += '<text x="10" y="' + (headerH - 8) + '" class="erd-title">' + t.name + '</text>';
+
+        var shown = Math.min(t.columns.length, maxRows);
+        for (var i = 0; i < shown; i++) {
+            var col = t.columns[i];
+            var y = headerH + 4 + i * rowH;
+            svg += '<text x="10" y="' + (y + 14) + '" class="erd-col">' + col.name + '</text>';
+            svg += '<text x="' + (pos.w - 10) + '" y="' + (y + 14) + '" class="erd-col-type" text-anchor="end">' + col.type + '</text>';
+        }
+        if (t.columns.length > maxRows) {
+            var y = headerH + 4 + shown * rowH;
+            svg += '<text x="10" y="' + (y + 14) + '" class="erd-col" style="fill:var(--text-4)">... ' + (t.columns.length - maxRows) + ' more</text>';
+        }
+
+        svg += '</g>';
+    });
+
+    svg += '</svg>';
+
+    container.innerHTML = '<div class="erd-toolbar">' +
+        '<span class="erd-info">' + tables.length + ' tables, ' + rels.length + ' relationships</span>' +
+        '</div>' + svg;
+}
+
+// Auto-init ERD
+document.addEventListener('DOMContentLoaded', function() {
+    var c = document.getElementById('erd-container');
+    if (c) initERD(c);
+});
+document.addEventListener('htmx:afterSettle', function() {
+    var c = document.getElementById('erd-container');
+    if (c && !c.querySelector('.erd-svg')) initERD(c);
+});
+
+// ─── Saved Queries ───────────────────────────────────────────────────────
+
+var SavedQueries = {
+    KEY: 'getgresql_saved_queries',
+
+    getAll: function() {
+        try { return JSON.parse(localStorage.getItem(this.KEY) || '[]'); }
+        catch(e) { return []; }
+    },
+
+    save: function(name, sql) {
+        var queries = this.getAll();
+        // Update if name exists
+        var existing = queries.findIndex(function(q) { return q.name === name; });
+        if (existing !== -1) {
+            queries[existing].sql = sql;
+            queries[existing].updated = Date.now();
+        } else {
+            queries.push({ name: name, sql: sql, created: Date.now(), updated: Date.now() });
+        }
+        localStorage.setItem(this.KEY, JSON.stringify(queries));
+    },
+
+    remove: function(name) {
+        var queries = this.getAll().filter(function(q) { return q.name !== name; });
+        localStorage.setItem(this.KEY, JSON.stringify(queries));
+    },
+
+    render: function() {
+        var queries = this.getAll();
+        if (queries.length === 0) {
+            return '<div class="empty-state">No saved queries. Use the Save button in the query editor toolbar.</div>';
+        }
+        var html = '<div class="saved-queries-list">';
+        queries.sort(function(a, b) { return b.updated - a.updated; });
+        queries.forEach(function(q) {
+            var preview = q.sql.length > 100 ? q.sql.substring(0, 100) + '...' : q.sql;
+            var date = new Date(q.updated).toLocaleDateString();
+            html += '<div class="saved-query-item">';
+            html += '<div class="saved-query-header">';
+            html += '<strong>' + q.name.replace(/</g, '&lt;') + '</strong>';
+            html += '<span class="saved-query-date">' + date + '</span>';
+            html += '</div>';
+            html += '<code class="saved-query-preview">' + preview.replace(/</g, '&lt;') + '</code>';
+            html += '<div class="saved-query-actions">';
+            html += '<button class="btn btn-sm btn-primary" data-load-query="' + q.name.replace(/"/g, '&quot;') + '">Load</button>';
+            html += '<button class="btn btn-sm btn-danger" data-delete-query="' + q.name.replace(/"/g, '&quot;') + '">Delete</button>';
+            html += '</div></div>';
+        });
+        html += '</div>';
+        return html;
+    }
+};

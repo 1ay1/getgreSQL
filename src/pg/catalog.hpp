@@ -126,6 +126,41 @@ struct FunctionSource {
     std::string definition;  // full CREATE OR REPLACE
 };
 
+// ─── Column statistics for data profiling ───────────────────────────
+
+struct ColumnStats {
+    std::string column_name;
+    std::string data_type;
+    double null_fraction;       // 0.0 - 1.0
+    long long n_distinct;       // negative = fraction of rows
+    int avg_width;
+    std::string most_common_vals;
+    std::string most_common_freqs;
+    std::string histogram_bounds;
+    double correlation;
+};
+
+// ─── Schema relationships for ERD ───────────────────────────────────
+
+struct SchemaRelationship {
+    std::string constraint_name;
+    std::string source_table;
+    std::string source_columns;  // comma-separated
+    std::string target_table;
+    std::string target_columns;  // comma-separated
+};
+
+struct ERDTable {
+    std::string name;
+    std::string type;  // table, view
+    std::vector<std::pair<std::string, std::string>> columns; // name, type
+};
+
+struct ERDData {
+    std::vector<ERDTable> tables;
+    std::vector<SchemaRelationship> relationships;
+};
+
 // ─── Completion metadata for SQL editor autocomplete ────────────────
 
 struct CompletionColumn {
@@ -165,6 +200,21 @@ auto get_function_source(const Connection& conn, std::string_view schema, std::s
 
 // Completion metadata for SQL editor autocomplete
 auto completion_metadata(const Connection& conn) -> Result<CompletionData>;
+
+// Generate CREATE TABLE DDL for a table
+auto table_ddl(const Connection& conn, std::string_view schema, std::string_view table) -> Result<std::string>;
+
+// Column-level statistics from pg_stats
+auto column_statistics(const Connection& conn, std::string_view schema, std::string_view table) -> Result<std::vector<ColumnStats>>;
+
+// ERD data: tables + foreign key relationships for a schema
+auto schema_erd(const Connection& conn, std::string_view schema) -> Result<ERDData>;
+
+// Run VACUUM on a table
+auto vacuum_table(const Connection& conn, std::string_view schema, std::string_view table) -> Result<bool>;
+
+// Run ANALYZE on a table
+auto analyze_table(const Connection& conn, std::string_view schema, std::string_view table) -> Result<bool>;
 
 // Table row count (exact, via COUNT(*))
 auto table_row_count(const Connection& conn, std::string_view schema, std::string_view table) -> Result<long long>;

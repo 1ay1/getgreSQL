@@ -105,6 +105,96 @@ struct DbActivitySummary {
     std::string size;
 };
 
+// ─── Deep analytics types ───────────────────────────────────────────
+
+struct SlowQuery {
+    int pid;
+    std::string database;
+    std::string user;
+    std::string query;
+    std::string duration;
+    std::string state;
+    std::string started;
+};
+
+struct DatabaseSize {
+    std::string name;
+    long long size_bytes;
+    std::string size;
+    long long connections;
+    long long xact_commit;
+    long long xact_rollback;
+    double cache_hit_ratio;
+    long long temp_bytes;
+    long long deadlocks;
+    std::string stats_reset;
+};
+
+struct TableBloat {
+    std::string schema;
+    std::string table;
+    long long real_size;
+    std::string real_size_pretty;
+    long long bloat_size;
+    std::string bloat_size_pretty;
+    double bloat_ratio;   // 0.0 - 1.0
+};
+
+struct BlockingChain {
+    int blocked_pid;
+    std::string blocked_user;
+    std::string blocked_query;
+    std::string blocked_duration;
+    int blocking_pid;
+    std::string blocking_user;
+    std::string blocking_query;
+    std::string blocking_duration;
+};
+
+struct WALStats {
+    std::string current_lsn;
+    std::string wal_level;
+    long long wal_buffers;
+    std::string checkpoint_timeout;
+    std::string last_checkpoint;
+    long long checkpoints_timed;
+    long long checkpoints_req;
+    double checkpoint_write_time;
+    double checkpoint_sync_time;
+    long long buffers_checkpoint;
+    long long buffers_backend;
+};
+
+struct VacuumProgress {
+    int pid;
+    std::string database;
+    std::string schema;
+    std::string table;
+    std::string phase;
+    long long heap_blks_total;
+    long long heap_blks_scanned;
+    long long heap_blks_vacuumed;
+    double percent_complete;
+};
+
+struct IndexBloat {
+    std::string schema;
+    std::string table;
+    std::string index;
+    long long real_size;
+    std::string real_size_pretty;
+    long long bloat_size;
+    std::string bloat_size_pretty;
+    double bloat_ratio;
+};
+
+struct HealthCheck {
+    std::string name;
+    std::string status;    // "ok", "warning", "critical"
+    std::string value;
+    std::string detail;
+};
+
 // ─── Monitor queries ────────────────────────────────────────────────
 
 auto server_stats(const Connection& conn) -> Result<ServerStats>;
@@ -128,5 +218,14 @@ auto explain_query(const Connection& conn, std::string_view sql, bool analyze = 
 
 // Per-database activity summary
 auto database_activity(const Connection& conn) -> Result<std::vector<DbActivitySummary>>;
+
+// Deep analytics
+auto slow_queries(const Connection& conn, int threshold_ms = 1000) -> Result<std::vector<SlowQuery>>;
+auto database_sizes(const Connection& conn) -> Result<std::vector<DatabaseSize>>;
+auto table_bloat(const Connection& conn, std::string_view schema = "public") -> Result<std::vector<TableBloat>>;
+auto blocking_chains(const Connection& conn) -> Result<std::vector<BlockingChain>>;
+auto wal_stats(const Connection& conn) -> Result<WALStats>;
+auto vacuum_progress(const Connection& conn) -> Result<std::vector<VacuumProgress>>;
+auto health_checks(const Connection& conn) -> Result<std::vector<HealthCheck>>;
 
 } // namespace getgresql::pg

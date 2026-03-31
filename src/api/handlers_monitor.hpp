@@ -31,4 +31,39 @@ struct CancelQueryHandler {
     static auto handle(Request& req, AppContext& ctx) -> Response;
 };
 
+// GET /monitor/slow — slow queries
+struct SlowQueriesHandler {
+    static auto handle(Request& req, AppContext& ctx) -> Response;
+};
+
+// GET /monitor/blocking — blocking chains
+struct BlockingHandler {
+    static auto handle(Request& req, AppContext& ctx) -> Response;
+};
+
+// GET /monitor/wal — WAL statistics
+struct WALStatsHandler {
+    static auto handle(Request& req, AppContext& ctx) -> Response;
+};
+
+// GET /monitor/vacuum-progress — vacuum progress
+struct VacuumProgressHandler {
+    static auto handle(Request& req, AppContext& ctx) -> Response;
+};
+
+// GET /monitor/health — health checks
+struct HealthCheckHandler {
+    static auto handle(Request& req, AppContext& ctx) -> Response;
+};
+
+// GET /monitor/databases — per-database detailed stats
+struct DatabaseStatsHandler {
+    static auto handle(Request& req, AppContext& ctx) -> Response;
+};
+
+// GET /monitor/bloat — table bloat detection
+struct BloatHandler {
+    static auto handle(Request& req, AppContext& ctx) -> Response;
+};
+
 } // namespace getgresql::api

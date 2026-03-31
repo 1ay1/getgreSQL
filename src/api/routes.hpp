@@ -38,6 +38,22 @@ using AppRoutes = RouteTable<
     Route<GET,  "/query",                                        QueryPageHandler>,
     Route<POST, "/query/exec",                                   QueryExecHandler>,
 
+    // Table tools
+    Route<GET,  "/db/{db}/schema/{schema}/table/{table}/ddl",         TableDDLHandler>,
+    Route<GET,  "/db/{db}/schema/{schema}/table/{table}/stats",       ColumnStatsHandler>,
+    Route<GET,  "/db/{db}/schema/{schema}/table/{table}/browse",      TableBrowseHandler>,
+    Route<GET,  "/db/{db}/schema/{schema}/table/{table}/export",      TableExportHandler>,
+    Route<POST, "/db/{db}/schema/{schema}/table/{table}/vacuum",      VacuumHandler>,
+    Route<POST, "/db/{db}/schema/{schema}/table/{table}/analyze",     AnalyzeHandler>,
+    Route<POST, "/db/{db}/schema/{schema}/table/{table}/update-cell", CellUpdateHandler>,
+    Route<POST, "/db/{db}/schema/{schema}/table/{table}/delete-row",  RowDeleteHandler>,
+    Route<POST, "/db/{db}/schema/{schema}/table/{table}/insert-row",  RowInsertHandler>,
+    Route<POST, "/db/{db}/schema/{schema}/table/{table}/truncate",    TruncateTableHandler>,
+
+    // ERD
+    Route<GET, "/db/{db}/schema/{schema}/erd",                     ERDDataHandler>,
+    Route<GET, "/db/{db}/schema/{schema}/erd/page",                ERDPageHandler>,
+
     // Database browsing (extended)
     Route<GET, "/db/{db}/schema/{schema}/functions",                FunctionListHandler>,
     Route<GET, "/db/{db}/schema/{schema}/function/{func}",          FunctionDetailHandler>,
@@ -61,6 +77,13 @@ using AppRoutes = RouteTable<
     Route<GET,  "/monitor/tablestats",                              TableStatsHandler>,
     Route<GET,  "/monitor/tablestats/data",                         TableStatsDataHandler>,
     Route<POST, "/monitor/terminate/{pid}",                         TerminateHandler>,
+    Route<GET,  "/monitor/health",                                  HealthCheckHandler>,
+    Route<GET,  "/monitor/slow",                                    SlowQueriesHandler>,
+    Route<GET,  "/monitor/blocking",                                BlockingHandler>,
+    Route<GET,  "/monitor/wal",                                     WALStatsHandler>,
+    Route<GET,  "/monitor/vacuum-progress",                         VacuumProgressHandler>,
+    Route<GET,  "/monitor/databases",                               DatabaseStatsHandler>,
+    Route<GET,  "/monitor/bloat",                                   BloatHandler>,
 
     // EXPLAIN
     Route<GET,  "/explain",                                         ExplainPageHandler>,

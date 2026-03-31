@@ -318,19 +318,37 @@ function esc(s) {
 
 // ─── Syntax highlighting ─────────────────────────────────────────────
 
-function highlight(sql) {
-    if (!sql) return '\n'; // Ensure at least one line for height
+function highlight(sql, selectedWord) {
+    if (!sql) return '\n';
     var tokens = tokenize(sql);
     var html = '';
+    var bracketDepth = 0;
+    var openBrackets = '([{';
+    var closeBrackets = ')]}';
+
     for (var i = 0; i < tokens.length; i++) {
         var t = tokens[i];
-        if (t.type === T.WHITESPACE || t.type === T.IDENTIFIER) {
-            html += esc(t.value);
+        var val = esc(t.value);
+
+        if (t.type === T.WHITESPACE) {
+            html += val;
+        } else if (t.type === T.PUNCTUATION && (openBrackets.indexOf(t.value) !== -1 || closeBrackets.indexOf(t.value) !== -1)) {
+            // Bracket pair colorization
+            if (closeBrackets.indexOf(t.value) !== -1 && bracketDepth > 0) bracketDepth--;
+            var cls = 'bracket-' + ((bracketDepth % 3) + 1);
+            html += '<span class="' + cls + '">' + val + '</span>';
+            if (openBrackets.indexOf(t.value) !== -1) bracketDepth++;
+        } else if (t.type === T.IDENTIFIER) {
+            // Selection occurrence highlighting
+            if (selectedWord && t.value.toLowerCase() === selectedWord.toLowerCase()) {
+                html += '<span class="sel-match">' + val + '</span>';
+            } else {
+                html += val;
+            }
         } else {
-            html += '<span class="tok-' + t.type + '">' + esc(t.value) + '</span>';
+            html += '<span class="tok-' + t.type + '">' + val + '</span>';
         }
     }
-    // Ensure trailing newline so textarea and pre match height
     if (sql[sql.length - 1] === '\n') html += '\n';
     return html;
 }
@@ -463,11 +481,44 @@ function fuzzyMatch(text, query) {
 
 // ─── SQL Editor Class ────────────────────────────────────────────────
 
+// ─── Editor Settings ─────────────────────────────────────────────────
+
+var EditorSettings = {
+    KEY: 'getgresql_editor_settings',
+    defaults: {
+        theme: '',        // '' = auto (follows page dark/light)
+        fontSize: 13,
+        tabSize: 4,
+        wordWrap: true,
+        minimap: true,
+        lineHighlight: true,
+        bracketColors: true,
+        indentGuides: true,
+    },
+    _cache: null,
+
+    get: function() {
+        if (this._cache) return this._cache;
+        try {
+            var saved = JSON.parse(localStorage.getItem(this.KEY) || '{}');
+            this._cache = Object.assign({}, this.defaults, saved);
+        } catch(e) { this._cache = Object.assign({}, this.defaults); }
+        return this._cache;
+    },
+
+    set: function(key, value) {
+        var s = this.get();
+        s[key] = value;
+        this._cache = s;
+        try { localStorage.setItem(this.KEY, JSON.stringify(s)); } catch(e) {}
+    }
+};
+
 function SQLEditorInstance(container, opts) {
     var self = this;
     opts = opts || {};
     this.container = container;
-    this.mode = container.getAttribute('data-mode') || 'query'; // 'query' or 'explain'
+    this.mode = container.getAttribute('data-mode') || 'query';
     this.completionData = null;
     this.tabs = [];
     this.activeTabId = null;
@@ -478,8 +529,11 @@ function SQLEditorInstance(container, opts) {
     this.acItems = [];
     this.acSelected = 0;
     this.findVisible = false;
+    this.selectedWord = '';
+    this.settings = EditorSettings.get();
 
     this.build();
+    this.applySettings();
     this.addTab(this.mode === 'explain' ? 'Explain 1' : 'Query 1');
     this.loadCompletions();
     this.bindEvents();
@@ -522,14 +576,34 @@ SQLEditorInstance.prototype.build = function() {
     this.textarea.setAttribute('placeholder', 'SELECT * FROM ...');
     this.textarea.setAttribute('wrap', 'off');
 
+    // Current line highlight (behind everything)
+    this.currentLineEl = document.createElement('div');
+    this.currentLineEl.className = 'editor-current-line';
+    this.editorArea.appendChild(this.currentLineEl);
+
+    // Indent guides layer
+    this.indentGuidesEl = document.createElement('div');
+    this.indentGuidesEl.className = 'editor-indent-guides';
+    this.editorArea.appendChild(this.indentGuidesEl);
+
     this.editorArea.appendChild(this.highlightPre);
     this.editorArea.appendChild(this.textarea);
 
-    var editorContainer = document.createElement('div');
-    editorContainer.className = 'editor-container';
-    editorContainer.appendChild(this.gutter);
-    editorContainer.appendChild(this.editorArea);
-    this.editorRegion.appendChild(editorContainer);
+    // Minimap
+    this.minimapEl = document.createElement('div');
+    this.minimapEl.className = 'editor-minimap';
+    this.minimapCanvas = document.createElement('canvas');
+    this.minimapViewport = document.createElement('div');
+    this.minimapViewport.className = 'minimap-viewport';
+    this.minimapEl.appendChild(this.minimapCanvas);
+    this.minimapEl.appendChild(this.minimapViewport);
+    this.editorArea.appendChild(this.minimapEl);
+
+    this.editorContainer = document.createElement('div');
+    this.editorContainer.className = 'editor-container';
+    this.editorContainer.appendChild(this.gutter);
+    this.editorContainer.appendChild(this.editorArea);
+    this.editorRegion.appendChild(this.editorContainer);
 
     // Toolbar
     this.toolbarEl = document.createElement('div');
@@ -547,13 +621,34 @@ SQLEditorInstance.prototype.build = function() {
             '<button class="btn btn-primary btn-sm" data-action="run">&#9654; Run <kbd>Ctrl+Enter</kbd></button>' +
             '<button class="btn btn-sm" data-action="explain">Explain</button>' +
             '<button class="btn btn-sm" data-action="explain-analyze">Explain Analyze</button>' +
+            '<span class="toolbar-sep-v"></span>' +
+            '<button class="btn btn-sm btn-ghost" data-action="save" title="Save Query (Ctrl+S)">Save</button>' +
+            '<button class="btn btn-sm btn-ghost" data-action="saved" title="Saved Queries">Saved</button>' +
+            '<button class="btn btn-sm btn-ghost" data-action="history" title="Query History">History</button>' +
             '<span class="toolbar-spacer"></span>' +
+            '<div class="btn-group">' +
+            '<button class="btn btn-sm btn-ghost" data-action="export-csv" title="Export CSV">CSV</button>' +
+            '<button class="btn btn-sm btn-ghost" data-action="export-json" title="Export JSON">JSON</button>' +
+            '<button class="btn btn-sm btn-ghost" data-action="export-sql" title="Export SQL">SQL</button>' +
+            '</div>' +
+            '<span class="toolbar-sep-v"></span>' +
             '<button class="btn btn-sm btn-ghost" data-action="find" title="Find (Ctrl+F)">&#128269;</button>' +
             '<button class="btn btn-sm btn-ghost" data-action="format" title="Format SQL">Format</button>' +
-            '<button class="btn btn-sm btn-ghost" data-action="history" title="Query History">History</button>' +
             '<span class="editor-status"></span>';
     }
+    // Append common items to toolbar
+    this.toolbarEl.innerHTML +=
+        '<button class="btn btn-sm btn-ghost" data-action="shortcuts" title="Keyboard Shortcuts">?</button>' +
+        '<button class="btn btn-sm btn-ghost" data-action="settings" title="Editor Settings">&#9881;</button>' +
+        '<span class="editor-cursor-info"><span class="cursor-pos">Ln 1, Col 1</span></span>';
     this.editorRegion.appendChild(this.toolbarEl);
+
+    // Go to Line bar
+    this.gotoLineBar = document.createElement('div');
+    this.gotoLineBar.className = 'goto-line-bar';
+    this.gotoLineBar.style.display = 'none';
+    this.gotoLineBar.innerHTML = '<label>Go to Line:</label><input type="number" min="1" placeholder="Line number">';
+    this.editorRegion.insertBefore(this.gotoLineBar, this.editorContainer);
 
     // Find bar
     this.findBar = document.createElement('div');
@@ -654,10 +749,11 @@ SQLEditorInstance.prototype.renderTabs = function() {
 
 SQLEditorInstance.prototype.syncHighlight = function() {
     var text = this.textarea.value;
-    this.highlightPre.innerHTML = highlight(text);
-    // Sync scroll
+    this.highlightPre.innerHTML = highlight(text, this.selectedWord);
     this.highlightPre.scrollTop = this.textarea.scrollTop;
     this.highlightPre.scrollLeft = this.textarea.scrollLeft;
+    this.updateCurrentLine();
+    this.updateMinimap();
 };
 
 SQLEditorInstance.prototype.updateGutter = function() {
@@ -1042,6 +1138,9 @@ SQLEditorInstance.prototype.bindEvents = function() {
         self.highlightPre.scrollTop = ta.scrollTop;
         self.highlightPre.scrollLeft = ta.scrollLeft;
         self.gutter.scrollTop = ta.scrollTop;
+        self.updateCurrentLine();
+        self.updateIndentGuides();
+        self.updateMinimap();
         if (self.acVisible) self.positionAutocomplete();
     });
 
@@ -1111,6 +1210,27 @@ SQLEditorInstance.prototype.bindEvents = function() {
         if ((e.ctrlKey || e.metaKey) && e.key === ' ') {
             e.preventDefault();
             self.showAutocomplete();
+            return;
+        }
+
+        // Ctrl+G -> go to line
+        if ((e.ctrlKey || e.metaKey) && e.key === 'g') {
+            e.preventDefault();
+            self.goToLine();
+            return;
+        }
+
+        // Ctrl+, -> settings
+        if ((e.ctrlKey || e.metaKey) && e.key === ',') {
+            e.preventDefault();
+            self.openSettings();
+            return;
+        }
+
+        // Ctrl+S -> save query
+        if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+            e.preventDefault();
+            self.saveQuery();
             return;
         }
 
@@ -1200,6 +1320,29 @@ SQLEditorInstance.prototype.bindEvents = function() {
         }
     });
 
+    // Cursor position update on click and selection change
+    ta.addEventListener('click', function() { self.updateCurrentLine(); });
+    ta.addEventListener('select', function() { self.updateCurrentLine(); });
+    document.addEventListener('selectionchange', function() {
+        if (document.activeElement === ta) self.updateCurrentLine();
+    });
+
+    // Arrow keys update cursor position
+    ta.addEventListener('keyup', function(e) {
+        if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Home','End','PageUp','PageDown'].indexOf(e.key) !== -1) {
+            self.updateCurrentLine();
+        }
+    });
+
+    // Minimap click to scroll
+    if (this.minimapEl) {
+        this.minimapEl.addEventListener('click', function(e) {
+            var rect = self.minimapEl.getBoundingClientRect();
+            var ratio = (e.clientY - rect.top) / rect.height;
+            ta.scrollTop = ratio * (ta.scrollHeight - ta.clientHeight);
+        });
+    }
+
     // Click outside hides autocomplete
     document.addEventListener('mousedown', function(e) {
         if (self.acVisible && !self.acPopup.contains(e.target)) {
@@ -1228,6 +1371,13 @@ SQLEditorInstance.prototype.bindEvents = function() {
         else if (action === 'find') self.toggleFind();
         else if (action === 'format') self.formatSQL();
         else if (action === 'history') self.showHistory();
+        else if (action === 'save') self.saveQuery();
+        else if (action === 'saved') self.showSavedQueries();
+        else if (action === 'export-csv') exportResults('csv');
+        else if (action === 'export-json') exportResults('json');
+        else if (action === 'export-sql') exportResults('sql');
+        else if (action === 'settings') self.openSettings();
+        else if (action === 'shortcuts') self.showShortcuts();
     });
 
     // Tab bar clicks
@@ -1314,6 +1464,8 @@ SQLEditorInstance.prototype.bindEvents = function() {
     // Initial sync
     this.syncHighlight();
     this.updateGutter();
+    this.updateCurrentLine();
+    this.updateIndentGuides();
 };
 
 // ─── Line Operations ─────────────────────────────────────────────────
@@ -1370,6 +1522,420 @@ SQLEditorInstance.prototype.deleteLine = function() {
     ta.selectionStart = ta.selectionEnd = Math.min(lineStart, ta.value.length);
     this.syncHighlight();
     this.updateGutter();
+};
+
+// ─── Current Line Highlight + Cursor Info ────────────────────────
+
+SQLEditorInstance.prototype.updateCurrentLine = function() {
+    var ta = this.textarea;
+    var text = ta.value.substring(0, ta.selectionStart);
+    var line = (text.match(/\n/g) || []).length;
+    var col = ta.selectionStart - text.lastIndexOf('\n') - 1;
+    var totalLines = (ta.value.match(/\n/g) || []).length + 1;
+
+    // Position current line highlight
+    if (this.settings.lineHighlight && this.currentLineEl) {
+        var lineH = parseFloat(getComputedStyle(ta).lineHeight) || (this.settings.fontSize * 1.6);
+        var padTop = parseFloat(getComputedStyle(ta).paddingTop) || 12;
+        this.currentLineEl.style.top = (padTop + line * lineH - ta.scrollTop) + 'px';
+        this.currentLineEl.style.height = lineH + 'px';
+        this.currentLineEl.style.display = '';
+    } else if (this.currentLineEl) {
+        this.currentLineEl.style.display = 'none';
+    }
+
+    // Active line number in gutter
+    var lineNums = this.gutter.querySelectorAll('.line-num');
+    lineNums.forEach(function(el, i) {
+        el.classList.toggle('active', i === line);
+    });
+
+    // Cursor position display
+    var cursorInfo = this.toolbarEl.querySelector('.cursor-pos');
+    if (cursorInfo) {
+        var selLen = Math.abs(ta.selectionEnd - ta.selectionStart);
+        var info = 'Ln ' + (line + 1) + ', Col ' + (col + 1);
+        if (selLen > 0) info += ' (' + selLen + ' selected)';
+        info += '  |  ' + totalLines + ' lines';
+        cursorInfo.textContent = info;
+    }
+
+    // Selection word highlighting
+    var newWord = '';
+    if (ta.selectionStart !== ta.selectionEnd) {
+        var sel = ta.value.substring(ta.selectionStart, ta.selectionEnd);
+        if (/^\w+$/.test(sel) && sel.length >= 2 && sel.length <= 60) {
+            newWord = sel;
+        }
+    }
+    if (newWord !== this.selectedWord) {
+        this.selectedWord = newWord;
+        this.highlightPre.innerHTML = highlight(ta.value, this.selectedWord);
+    }
+};
+
+// ─── Minimap ─────────────────────────────────────────────────────
+
+SQLEditorInstance.prototype.updateMinimap = function() {
+    if (!this.settings.minimap || !this.minimapCanvas) return;
+    var text = this.textarea.value;
+    var lines = text.split('\n');
+    var canvas = this.minimapCanvas;
+    var ctx = canvas.getContext('2d');
+    var dpr = window.devicePixelRatio || 1;
+    var w = 64;
+    var lineH = 2;
+    var h = Math.max(this.editorArea.clientHeight, lines.length * lineH);
+
+    canvas.width = w * dpr;
+    canvas.height = h * dpr;
+    canvas.style.height = h + 'px';
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, w, h);
+
+    // Color map for tokens
+    var colorMap = {};
+    var cs = getComputedStyle(this.editorContainer);
+    colorMap[T.KEYWORD] = cs.getPropertyValue('--ed-kw').trim() || '#7ee0ff';
+    colorMap[T.STRING] = cs.getPropertyValue('--ed-st').trim() || '#a5d6a7';
+    colorMap[T.COMMENT] = cs.getPropertyValue('--ed-cm').trim() || '#6e7681';
+    colorMap[T.NUMBER] = cs.getPropertyValue('--ed-nu').trim() || '#ffab70';
+    colorMap[T.BUILTIN] = cs.getPropertyValue('--ed-fn').trim() || '#dcbdfb';
+    colorMap[T.TYPE] = cs.getPropertyValue('--ed-ty').trim() || '#56d4dd';
+    var defaultColor = cs.getPropertyValue('--ed-fg').trim() || '#c9d1d9';
+
+    // Simple render: draw colored rectangles per character
+    var charW = 1;
+    lines.forEach(function(line, lineIdx) {
+        var y = lineIdx * lineH;
+        if (y > h) return;
+        var tokens = tokenize(line);
+        var x = 4;
+        tokens.forEach(function(tok) {
+            if (tok.type === T.WHITESPACE) { x += tok.value.length * charW; return; }
+            var color = colorMap[tok.type] || defaultColor;
+            ctx.fillStyle = color;
+            ctx.globalAlpha = 0.6;
+            ctx.fillRect(x, y, tok.value.length * charW, lineH);
+            x += tok.value.length * charW;
+        });
+    });
+    ctx.globalAlpha = 1.0;
+
+    // Viewport indicator
+    var ta = this.textarea;
+    var visibleRatio = ta.clientHeight / Math.max(ta.scrollHeight, 1);
+    var scrollRatio = ta.scrollTop / Math.max(ta.scrollHeight - ta.clientHeight, 1);
+    var vpH = Math.max(20, h * visibleRatio);
+    var vpY = (h - vpH) * scrollRatio;
+    this.minimapViewport.style.top = vpY + 'px';
+    this.minimapViewport.style.height = vpH + 'px';
+};
+
+// ─── Indent Guides ───────────────────────────────────────────────
+
+SQLEditorInstance.prototype.updateIndentGuides = function() {
+    if (!this.settings.indentGuides || !this.indentGuidesEl) {
+        if (this.indentGuidesEl) this.indentGuidesEl.innerHTML = '';
+        return;
+    }
+    var ta = this.textarea;
+    var text = ta.value;
+    var lines = text.split('\n');
+    var tabSize = this.settings.tabSize || 4;
+    var lineH = parseFloat(getComputedStyle(ta).lineHeight) || (this.settings.fontSize * 1.6);
+    var padTop = parseFloat(getComputedStyle(ta).paddingTop) || 12;
+    var padLeft = parseFloat(getComputedStyle(ta).paddingLeft) || 12;
+
+    // Measure char width
+    if (!this._charWidth) {
+        var span = document.createElement('span');
+        span.style.cssText = 'position:absolute;visibility:hidden;font-family:' + getComputedStyle(ta).fontFamily + ';font-size:' + getComputedStyle(ta).fontSize;
+        span.textContent = 'x';
+        document.body.appendChild(span);
+        this._charWidth = span.getBoundingClientRect().width;
+        document.body.removeChild(span);
+    }
+    var charW = this._charWidth;
+
+    var html = '';
+    var maxGuides = 8;
+    for (var level = 1; level <= maxGuides; level++) {
+        var x = padLeft + level * tabSize * charW;
+        // Find line ranges where indent >= this level
+        var start = -1;
+        for (var i = 0; i <= lines.length; i++) {
+            var lineIndent = 0;
+            if (i < lines.length) {
+                var m = lines[i].match(/^(\s*)/);
+                if (m) lineIndent = Math.floor(m[1].replace(/\t/g, '    ').length / tabSize);
+            }
+            if (lineIndent >= level) {
+                if (start === -1) start = i;
+            } else {
+                if (start !== -1) {
+                    var top = padTop + start * lineH - ta.scrollTop;
+                    var height = (i - start) * lineH;
+                    if (top + height > 0 && top < ta.clientHeight) {
+                        html += '<div class="indent-guide" style="left:' + x.toFixed(1) + 'px;top:' + top.toFixed(1) + 'px;height:' + height.toFixed(1) + 'px"></div>';
+                    }
+                    start = -1;
+                }
+            }
+        }
+    }
+    this.indentGuidesEl.innerHTML = html;
+};
+
+// ─── Apply Settings ──────────────────────────────────────────────
+
+SQLEditorInstance.prototype.applySettings = function() {
+    var s = this.settings;
+
+    // Theme
+    if (s.theme) {
+        this.editorContainer.setAttribute('data-editor-theme', s.theme);
+    } else {
+        this.editorContainer.removeAttribute('data-editor-theme');
+    }
+
+    // Font size
+    this.editorContainer.style.setProperty('--ed-font-size', s.fontSize + 'px');
+
+    // Tab size
+    this.editorContainer.style.setProperty('--ed-tab-size', s.tabSize);
+
+    // Word wrap
+    var wrapVal = s.wordWrap ? 'pre-wrap' : 'pre';
+    if (this.textarea) this.textarea.style.whiteSpace = wrapVal;
+    if (this.highlightPre) this.highlightPre.style.whiteSpace = wrapVal;
+    if (this.textarea) this.textarea.style.overflowX = s.wordWrap ? 'hidden' : 'auto';
+    if (this.highlightPre) this.highlightPre.style.overflowX = s.wordWrap ? 'hidden' : 'auto';
+
+    // Minimap
+    if (this.minimapEl) {
+        this.minimapEl.style.display = s.minimap ? '' : 'none';
+        this.editorArea.classList.toggle('has-minimap', s.minimap);
+    }
+
+    // Current line highlight
+    if (this.currentLineEl) {
+        this.currentLineEl.style.display = s.lineHighlight ? '' : 'none';
+    }
+
+    // Reset char width cache on font size change
+    this._charWidth = null;
+};
+
+// ─── Settings Panel ──────────────────────────────────────────────
+
+SQLEditorInstance.prototype.openSettings = function() {
+    var self = this;
+    if (document.querySelector('.command-overlay')) return;
+
+    var s = this.settings;
+    var themes = [
+        { id: '', name: 'Auto', bg: '#161b22', fg: '#7ee0ff' },
+        { id: 'monokai', name: 'Monokai', bg: '#272822', fg: '#f92672' },
+        { id: 'dracula', name: 'Dracula', bg: '#282a36', fg: '#ff79c6' },
+        { id: 'nord', name: 'Nord', bg: '#2e3440', fg: '#81a1c1' },
+        { id: 'solarized', name: 'Solarized', bg: '#002b36', fg: '#268bd2' },
+        { id: 'one-dark', name: 'One Dark', bg: '#282c34', fg: '#c678dd' },
+        { id: 'github-light', name: 'GitHub', bg: '#ffffff', fg: '#cf222e' },
+        { id: 'high-contrast', name: 'HC', bg: '#000000', fg: '#6cf' },
+    ];
+
+    var overlay = document.createElement('div');
+    overlay.className = 'command-overlay';
+    var panel = document.createElement('div');
+    panel.className = 'settings-panel';
+
+    var themeSwatches = themes.map(function(t) {
+        return '<div class="theme-swatch' + (s.theme === t.id ? ' active' : '') + '" ' +
+            'data-theme-id="' + t.id + '" ' +
+            'style="background:' + t.bg + ';color:' + t.fg + '" title="' + t.name + '">' +
+            t.name.substring(0, 3) + '</div>';
+    }).join('');
+
+    panel.innerHTML =
+        '<div class="settings-header"><span>Editor Settings</span><button data-close>&times;</button></div>' +
+        '<div class="settings-body">' +
+        '<div class="settings-group"><div class="settings-group-title">Appearance</div>' +
+        '<div class="settings-row"><span class="settings-label">Theme</span></div>' +
+        '<div class="theme-preview">' + themeSwatches + '</div>' +
+        '<div class="settings-row"><span class="settings-label">Font Size</span>' +
+        '<input type="number" class="settings-input-num" value="' + s.fontSize + '" min="10" max="24" data-setting="fontSize"></div>' +
+        '</div>' +
+        '<div class="settings-group"><div class="settings-group-title">Editor</div>' +
+        '<div class="settings-row"><span class="settings-label">Tab Size</span>' +
+        '<input type="number" class="settings-input-num" value="' + s.tabSize + '" min="2" max="8" data-setting="tabSize"></div>' +
+        '<div class="settings-row"><span class="settings-label">Word Wrap</span>' +
+        '<button class="settings-toggle' + (s.wordWrap ? ' on' : '') + '" data-toggle="wordWrap"></button></div>' +
+        '<div class="settings-row"><span class="settings-label">Minimap</span>' +
+        '<button class="settings-toggle' + (s.minimap ? ' on' : '') + '" data-toggle="minimap"></button></div>' +
+        '<div class="settings-row"><span class="settings-label">Line Highlight</span>' +
+        '<button class="settings-toggle' + (s.lineHighlight ? ' on' : '') + '" data-toggle="lineHighlight"></button></div>' +
+        '<div class="settings-row"><span class="settings-label">Bracket Colors</span>' +
+        '<button class="settings-toggle' + (s.bracketColors ? ' on' : '') + '" data-toggle="bracketColors"></button></div>' +
+        '<div class="settings-row"><span class="settings-label">Indent Guides</span>' +
+        '<button class="settings-toggle' + (s.indentGuides ? ' on' : '') + '" data-toggle="indentGuides"></button></div>' +
+        '</div></div>';
+
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+
+    // Event handlers
+    overlay.addEventListener('click', function(e) {
+        if (e.target === overlay || e.target.hasAttribute('data-close')) {
+            overlay.remove();
+            return;
+        }
+        var swatch = e.target.closest('.theme-swatch');
+        if (swatch) {
+            var themeId = swatch.getAttribute('data-theme-id');
+            self.settings.theme = themeId;
+            EditorSettings.set('theme', themeId);
+            self.applySettings();
+            self.syncHighlight();
+            panel.querySelectorAll('.theme-swatch').forEach(function(s) { s.classList.remove('active'); });
+            swatch.classList.add('active');
+            return;
+        }
+        var toggle = e.target.closest('.settings-toggle');
+        if (toggle) {
+            var key = toggle.getAttribute('data-toggle');
+            toggle.classList.toggle('on');
+            self.settings[key] = toggle.classList.contains('on');
+            EditorSettings.set(key, self.settings[key]);
+            self.applySettings();
+            self.syncHighlight();
+            self.updateIndentGuides();
+        }
+    });
+
+    panel.addEventListener('change', function(e) {
+        var input = e.target;
+        var key = input.getAttribute('data-setting');
+        if (!key) return;
+        var val = parseInt(input.value);
+        if (isNaN(val)) return;
+        self.settings[key] = val;
+        EditorSettings.set(key, val);
+        self.applySettings();
+        self.syncHighlight();
+        self.updateGutter();
+    });
+};
+
+// ─── Go to Line ──────────────────────────────────────────────────
+
+SQLEditorInstance.prototype.goToLine = function() {
+    var self = this;
+    this.gotoLineBar.style.display = 'flex';
+    var input = this.gotoLineBar.querySelector('input');
+    input.value = '';
+    input.focus();
+
+    var handler = function(e) {
+        if (e.key === 'Enter') {
+            var lineNum = parseInt(input.value);
+            if (!isNaN(lineNum) && lineNum > 0) {
+                var lines = self.textarea.value.split('\n');
+                var offset = 0;
+                for (var i = 0; i < Math.min(lineNum - 1, lines.length); i++) {
+                    offset += lines[i].length + 1;
+                }
+                self.textarea.selectionStart = self.textarea.selectionEnd = offset;
+                self.textarea.focus();
+                self.updateCurrentLine();
+            }
+            self.gotoLineBar.style.display = 'none';
+            input.removeEventListener('keydown', handler);
+        } else if (e.key === 'Escape') {
+            self.gotoLineBar.style.display = 'none';
+            self.textarea.focus();
+            input.removeEventListener('keydown', handler);
+        }
+    };
+    input.addEventListener('keydown', handler);
+};
+
+// ─── Keyboard Shortcut Reference ─────────────────────────────────
+
+SQLEditorInstance.prototype.showShortcuts = function() {
+    if (document.querySelector('.command-overlay')) return;
+    var overlay = document.createElement('div');
+    overlay.className = 'command-overlay';
+    overlay.innerHTML =
+        '<div class="settings-panel">' +
+        '<div class="settings-header"><span>Keyboard Shortcuts</span><button onclick="this.closest(\'.command-overlay\').remove()">&times;</button></div>' +
+        '<div class="shortcuts-grid">' +
+        '<div class="shortcut-item"><span class="label">Run Query</span><kbd>Ctrl+Enter</kbd></div>' +
+        '<div class="shortcut-item"><span class="label">Autocomplete</span><kbd>Ctrl+Space</kbd></div>' +
+        '<div class="shortcut-item"><span class="label">Find / Replace</span><kbd>Ctrl+F</kbd></div>' +
+        '<div class="shortcut-item"><span class="label">Go to Line</span><kbd>Ctrl+G</kbd></div>' +
+        '<div class="shortcut-item"><span class="label">Save Query</span><kbd>Ctrl+S</kbd></div>' +
+        '<div class="shortcut-item"><span class="label">Toggle Comment</span><kbd>Ctrl+/</kbd></div>' +
+        '<div class="shortcut-item"><span class="label">Duplicate Line</span><kbd>Ctrl+D</kbd></div>' +
+        '<div class="shortcut-item"><span class="label">Delete Line</span><kbd>Ctrl+Shift+K</kbd></div>' +
+        '<div class="shortcut-item"><span class="label">Select Line</span><kbd>Ctrl+L</kbd></div>' +
+        '<div class="shortcut-item"><span class="label">Indent</span><kbd>Tab</kbd></div>' +
+        '<div class="shortcut-item"><span class="label">Outdent</span><kbd>Shift+Tab</kbd></div>' +
+        '<div class="shortcut-item"><span class="label">Command Palette</span><kbd>Ctrl+K</kbd></div>' +
+        '<div class="shortcut-item"><span class="label">Settings</span><kbd>Ctrl+,</kbd></div>' +
+        '<div class="shortcut-item"><span class="label">Close Panel</span><kbd>Escape</kbd></div>' +
+        '</div></div>';
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
+};
+
+// ─── Saved Queries ───────────────────────────────────────────────
+
+SQLEditorInstance.prototype.saveQuery = function() {
+    var sql = this.textarea.value.trim();
+    if (!sql) return;
+    var tab = this.tabs.find(function(t) { return t.id === this.activeTabId; }.bind(this));
+    var defaultName = tab ? tab.title : 'Untitled';
+    var name = prompt('Save query as:', defaultName);
+    if (!name) return;
+    SavedQueries.save(name, sql);
+    // Update tab title
+    if (tab) {
+        tab.title = name;
+        this.renderTabs();
+    }
+    this.updateStatus('Saved: ' + name);
+};
+
+SQLEditorInstance.prototype.showSavedQueries = function() {
+    var self = this;
+    this.resultsEl.innerHTML = '<div style="padding:var(--sp-4)"><h3>Saved Queries</h3>' + SavedQueries.render() + '</div>';
+
+    // Bind load/delete buttons
+    this.resultsEl.querySelectorAll('[data-load-query]').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var name = this.getAttribute('data-load-query');
+            var queries = SavedQueries.getAll();
+            var q = queries.find(function(x) { return x.name === name; });
+            if (q) {
+                self.textarea.value = q.sql;
+                self.syncHighlight();
+                self.updateGutter();
+                var tab = self.tabs.find(function(t) { return t.id === self.activeTabId; });
+                if (tab) { tab.title = name; self.renderTabs(); }
+                self.textarea.focus();
+            }
+        });
+    });
+    this.resultsEl.querySelectorAll('[data-delete-query]').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var name = this.getAttribute('data-delete-query');
+            if (confirm('Delete "' + name + '"?')) {
+                SavedQueries.remove(name);
+                self.showSavedQueries();
+            }
+        });
+    });
 };
 
 // ─── Public API ──────────────────────────────────────────────────────

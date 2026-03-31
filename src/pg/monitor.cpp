@@ -335,4 +335,328 @@ auto database_activity(const Connection& conn) -> Result<std::vector<DbActivityS
     return summaries;
 }
 
+// ─── Slow Queries ───────────────────────────────────────────────────
+
+auto slow_queries(const Connection& conn, int threshold_ms) -> Result<std::vector<SlowQuery>> {
+    auto sql = std::format(
+        "SELECT pid, datname, usename, query, "
+        "EXTRACT(EPOCH FROM (now() - query_start))::int || 's' AS duration, "
+        "state, query_start::text "
+        "FROM pg_stat_activity "
+        "WHERE state != 'idle' AND query NOT LIKE '%pg_stat_activity%' "
+        "AND (now() - query_start) > interval '{} milliseconds' "
+        "ORDER BY query_start ASC",
+        threshold_ms
+    );
+    auto res = conn.exec(sql);
+    if (!res) return std::unexpected(res.error());
+
+    std::vector<SlowQuery> queries;
+    for (auto row : *res) {
+        queries.push_back({
+            .pid = static_cast<int>(res->get_int(row.index(), 0).value_or(0)),
+            .database = std::string(row[1]),
+            .user = std::string(row[2]),
+            .query = std::string(row[3]),
+            .duration = std::string(row[4]),
+            .state = std::string(row[5]),
+            .started = row.is_null(6) ? std::string() : std::string(row[6]),
+        });
+    }
+    return queries;
+}
+
+// ─── Database Sizes (detailed) ──────────────────────────────────────
+
+auto database_sizes(const Connection& conn) -> Result<std::vector<DatabaseSize>> {
+    auto res = conn.exec(
+        "SELECT d.datname, "
+        "pg_database_size(d.datname) AS size_bytes, "
+        "pg_size_pretty(pg_database_size(d.datname)) AS size, "
+        "COALESCE(s.numbackends, 0) AS connections, "
+        "COALESCE(s.xact_commit, 0) AS commits, "
+        "COALESCE(s.xact_rollback, 0) AS rollbacks, "
+        "CASE WHEN COALESCE(s.blks_hit, 0) + COALESCE(s.blks_read, 0) = 0 THEN 1.0 "
+        "  ELSE s.blks_hit::float / (s.blks_hit + s.blks_read) END AS cache_ratio, "
+        "COALESCE(s.temp_bytes, 0) AS temp_bytes, "
+        "COALESCE(s.deadlocks, 0) AS deadlocks, "
+        "COALESCE(s.stats_reset::text, '') AS stats_reset "
+        "FROM pg_database d "
+        "LEFT JOIN pg_stat_database s ON s.datname = d.datname "
+        "WHERE d.datallowconn = true "
+        "ORDER BY pg_database_size(d.datname) DESC"
+    );
+    if (!res) return std::unexpected(res.error());
+
+    std::vector<DatabaseSize> sizes;
+    for (auto row : *res) {
+        sizes.push_back({
+            .name = std::string(row[0]),
+            .size_bytes = res->get_int(row.index(), 1).value_or(0),
+            .size = std::string(row[2]),
+            .connections = res->get_int(row.index(), 3).value_or(0),
+            .xact_commit = res->get_int(row.index(), 4).value_or(0),
+            .xact_rollback = res->get_int(row.index(), 5).value_or(0),
+            .cache_hit_ratio = res->get_double(row.index(), 6).value_or(1.0),
+            .temp_bytes = res->get_int(row.index(), 7).value_or(0),
+            .deadlocks = res->get_int(row.index(), 8).value_or(0),
+            .stats_reset = std::string(row[9]),
+        });
+    }
+    return sizes;
+}
+
+// ─── Table Bloat ────────────────────────────────────────────────────
+
+auto table_bloat(const Connection& conn, std::string_view schema) -> Result<std::vector<TableBloat>> {
+    auto sql = std::format(
+        "SELECT schemaname, relname, "
+        "pg_total_relation_size(schemaname || '.' || relname) AS real_size, "
+        "pg_size_pretty(pg_total_relation_size(schemaname || '.' || relname)) AS real_size_pretty, "
+        "COALESCE(n_dead_tup, 0) * "
+        "  CASE WHEN COALESCE(n_live_tup, 0) + COALESCE(n_dead_tup, 0) = 0 THEN 0 "
+        "    ELSE pg_total_relation_size(schemaname || '.' || relname)::float / "
+        "      (COALESCE(n_live_tup, 1) + COALESCE(n_dead_tup, 0)) END AS bloat_est, "
+        "COALESCE(n_dead_tup::float / NULLIF(n_live_tup + n_dead_tup, 0), 0) AS bloat_ratio "
+        "FROM pg_stat_user_tables "
+        "WHERE schemaname = '{}' "
+        "ORDER BY bloat_ratio DESC",
+        schema
+    );
+    auto res = conn.exec(sql);
+    if (!res) return std::unexpected(res.error());
+
+    std::vector<TableBloat> bloat;
+    for (auto row : *res) {
+        auto bloat_bytes = static_cast<long long>(res->get_double(row.index(), 4).value_or(0));
+        auto format_sz = [](long long b) -> std::string {
+            if (b >= 1073741824LL) return std::format("{:.1f} GB", static_cast<double>(b) / 1073741824.0);
+            if (b >= 1048576LL) return std::format("{:.1f} MB", static_cast<double>(b) / 1048576.0);
+            if (b >= 1024LL) return std::format("{:.1f} KB", static_cast<double>(b) / 1024.0);
+            return std::format("{} B", b);
+        };
+        bloat.push_back({
+            .schema = std::string(row[0]),
+            .table = std::string(row[1]),
+            .real_size = res->get_int(row.index(), 2).value_or(0),
+            .real_size_pretty = std::string(row[3]),
+            .bloat_size = bloat_bytes,
+            .bloat_size_pretty = format_sz(bloat_bytes),
+            .bloat_ratio = res->get_double(row.index(), 5).value_or(0.0),
+        });
+    }
+    return bloat;
+}
+
+// ─── Blocking Chains ────────────────────────────────────────────────
+
+auto blocking_chains(const Connection& conn) -> Result<std::vector<BlockingChain>> {
+    auto res = conn.exec(
+        "SELECT blocked.pid AS blocked_pid, "
+        "blocked_activity.usename AS blocked_user, "
+        "blocked_activity.query AS blocked_query, "
+        "EXTRACT(EPOCH FROM (now() - blocked_activity.query_start))::int || 's' AS blocked_duration, "
+        "blocking.pid AS blocking_pid, "
+        "blocking_activity.usename AS blocking_user, "
+        "blocking_activity.query AS blocking_query, "
+        "EXTRACT(EPOCH FROM (now() - blocking_activity.query_start))::int || 's' AS blocking_duration "
+        "FROM pg_locks blocked "
+        "JOIN pg_stat_activity blocked_activity ON blocked.pid = blocked_activity.pid "
+        "JOIN pg_locks blocking ON blocking.locktype = blocked.locktype "
+        "  AND blocking.database IS NOT DISTINCT FROM blocked.database "
+        "  AND blocking.relation IS NOT DISTINCT FROM blocked.relation "
+        "  AND blocking.page IS NOT DISTINCT FROM blocked.page "
+        "  AND blocking.tuple IS NOT DISTINCT FROM blocked.tuple "
+        "  AND blocking.pid != blocked.pid "
+        "JOIN pg_stat_activity blocking_activity ON blocking.pid = blocking_activity.pid "
+        "WHERE NOT blocked.granted AND blocking.granted"
+    );
+    if (!res) return std::unexpected(res.error());
+
+    std::vector<BlockingChain> chains;
+    for (auto row : *res) {
+        chains.push_back({
+            .blocked_pid = static_cast<int>(res->get_int(row.index(), 0).value_or(0)),
+            .blocked_user = std::string(row[1]),
+            .blocked_query = std::string(row[2]),
+            .blocked_duration = std::string(row[3]),
+            .blocking_pid = static_cast<int>(res->get_int(row.index(), 4).value_or(0)),
+            .blocking_user = std::string(row[5]),
+            .blocking_query = std::string(row[6]),
+            .blocking_duration = std::string(row[7]),
+        });
+    }
+    return chains;
+}
+
+// ─── WAL Stats ──────────────────────────────────────────────────────
+
+auto wal_stats(const Connection& conn) -> Result<WALStats> {
+    auto res = conn.exec(
+        "SELECT pg_current_wal_lsn()::text, "
+        "current_setting('wal_level'), "
+        "current_setting('wal_buffers'), "
+        "current_setting('checkpoint_timeout'), "
+        "COALESCE(checkpoint_time::text, '') AS last_checkpoint, "
+        "checkpoints_timed, checkpoints_req, "
+        "checkpoint_write_time, checkpoint_sync_time, "
+        "buffers_checkpoint, buffers_backend "
+        "FROM pg_stat_bgwriter"
+    );
+    if (!res) return std::unexpected(res.error());
+    if (res->row_count() == 0) return WALStats{};
+
+    return WALStats{
+        .current_lsn = std::string(res->get(0, 0)),
+        .wal_level = std::string(res->get(0, 1)),
+        .wal_buffers = res->get_int(0, 2).value_or(0),
+        .checkpoint_timeout = std::string(res->get(0, 3)),
+        .last_checkpoint = std::string(res->get(0, 4)),
+        .checkpoints_timed = res->get_int(0, 5).value_or(0),
+        .checkpoints_req = res->get_int(0, 6).value_or(0),
+        .checkpoint_write_time = res->get_double(0, 7).value_or(0.0),
+        .checkpoint_sync_time = res->get_double(0, 8).value_or(0.0),
+        .buffers_checkpoint = res->get_int(0, 9).value_or(0),
+        .buffers_backend = res->get_int(0, 10).value_or(0),
+    };
+}
+
+// ─── Vacuum Progress ────────────────────────────────────────────────
+
+auto vacuum_progress(const Connection& conn) -> Result<std::vector<VacuumProgress>> {
+    auto res = conn.exec(
+        "SELECT p.pid, a.datname, n.nspname, c.relname, p.phase, "
+        "p.heap_blks_total, p.heap_blks_scanned, p.heap_blks_vacuumed, "
+        "CASE WHEN p.heap_blks_total > 0 THEN "
+        "  p.heap_blks_vacuumed::float / p.heap_blks_total * 100 ELSE 0 END AS pct "
+        "FROM pg_stat_progress_vacuum p "
+        "JOIN pg_stat_activity a ON a.pid = p.pid "
+        "JOIN pg_class c ON c.oid = p.relid "
+        "JOIN pg_namespace n ON n.oid = c.relnamespace "
+        "ORDER BY p.pid"
+    );
+    if (!res) return std::unexpected(res.error());
+
+    std::vector<VacuumProgress> progress;
+    for (auto row : *res) {
+        progress.push_back({
+            .pid = static_cast<int>(res->get_int(row.index(), 0).value_or(0)),
+            .database = std::string(row[1]),
+            .schema = std::string(row[2]),
+            .table = std::string(row[3]),
+            .phase = std::string(row[4]),
+            .heap_blks_total = res->get_int(row.index(), 5).value_or(0),
+            .heap_blks_scanned = res->get_int(row.index(), 6).value_or(0),
+            .heap_blks_vacuumed = res->get_int(row.index(), 7).value_or(0),
+            .percent_complete = res->get_double(row.index(), 8).value_or(0.0),
+        });
+    }
+    return progress;
+}
+
+// ─── Health Checks ──────────────────────────────────────────────────
+
+auto health_checks(const Connection& conn) -> Result<std::vector<HealthCheck>> {
+    std::vector<HealthCheck> checks;
+
+    // 1. Cache hit ratio
+    auto cache = conn.exec(
+        "SELECT COALESCE(SUM(blks_hit)::float / NULLIF(SUM(blks_hit) + SUM(blks_read), 0) * 100, 100) "
+        "FROM pg_stat_database"
+    );
+    if (cache && cache->row_count() > 0) {
+        auto ratio = cache->get_double(0, 0).value_or(100.0);
+        checks.push_back({
+            .name = "Cache Hit Ratio",
+            .status = ratio >= 99 ? "ok" : ratio >= 90 ? "warning" : "critical",
+            .value = std::format("{:.1f}%", ratio),
+            .detail = ratio < 90 ? "Consider increasing shared_buffers" : "Healthy",
+        });
+    }
+
+    // 2. Connection usage
+    auto conns = conn.exec(
+        "SELECT count(*), current_setting('max_connections')::int "
+        "FROM pg_stat_activity"
+    );
+    if (conns && conns->row_count() > 0) {
+        auto used = conns->get_int(0, 0).value_or(0);
+        auto max = conns->get_int(0, 1).value_or(100);
+        auto pct = max > 0 ? (static_cast<double>(used) / max * 100) : 0;
+        checks.push_back({
+            .name = "Connection Usage",
+            .status = pct < 70 ? "ok" : pct < 90 ? "warning" : "critical",
+            .value = std::format("{}/{} ({:.0f}%)", used, max, pct),
+            .detail = pct >= 90 ? "Near max_connections limit" : "Normal",
+        });
+    }
+
+    // 3. Long running transactions
+    auto long_txn = conn.exec(
+        "SELECT count(*), COALESCE(max(EXTRACT(EPOCH FROM (now() - xact_start)))::int, 0) "
+        "FROM pg_stat_activity "
+        "WHERE state = 'idle in transaction' AND xact_start < now() - interval '5 minutes'"
+    );
+    if (long_txn && long_txn->row_count() > 0) {
+        auto cnt = long_txn->get_int(0, 0).value_or(0);
+        auto maxsec = long_txn->get_int(0, 1).value_or(0);
+        checks.push_back({
+            .name = "Idle-in-Transaction",
+            .status = cnt == 0 ? "ok" : cnt <= 2 ? "warning" : "critical",
+            .value = std::format("{} sessions", cnt),
+            .detail = cnt > 0 ? std::format("Longest: {}s — may hold locks", maxsec) : "None",
+        });
+    }
+
+    // 4. Dead rows (needs vacuum)
+    auto dead = conn.exec(
+        "SELECT count(*) FROM pg_stat_user_tables "
+        "WHERE n_dead_tup > n_live_tup * 0.2 AND n_live_tup > 100"
+    );
+    if (dead && dead->row_count() > 0) {
+        auto cnt = dead->get_int(0, 0).value_or(0);
+        checks.push_back({
+            .name = "Tables Needing Vacuum",
+            .status = cnt == 0 ? "ok" : cnt <= 3 ? "warning" : "critical",
+            .value = std::format("{} tables", cnt),
+            .detail = cnt > 0 ? "High dead row ratio (>20%)" : "All tables healthy",
+        });
+    }
+
+    // 5. Replication lag
+    auto rep = conn.exec(
+        "SELECT slot_name, NOT active AS lagging FROM pg_replication_slots"
+    );
+    if (rep) {
+        int inactive = 0;
+        for (auto row : *rep) {
+            if (rep->get_bool(row.index(), 1).value_or(false)) inactive++;
+        }
+        if (rep->row_count() > 0) {
+            checks.push_back({
+                .name = "Replication Slots",
+                .status = inactive == 0 ? "ok" : "critical",
+                .value = std::format("{}/{} active", rep->row_count() - inactive, rep->row_count()),
+                .detail = inactive > 0 ? "Inactive slots accumulate WAL" : "All slots active",
+            });
+        }
+    }
+
+    // 6. Deadlocks
+    auto dlocks = conn.exec(
+        "SELECT COALESCE(SUM(deadlocks), 0) FROM pg_stat_database"
+    );
+    if (dlocks && dlocks->row_count() > 0) {
+        auto cnt = dlocks->get_int(0, 0).value_or(0);
+        checks.push_back({
+            .name = "Deadlocks (total)",
+            .status = cnt == 0 ? "ok" : "warning",
+            .value = std::to_string(cnt),
+            .detail = cnt > 0 ? "Review application lock ordering" : "No deadlocks recorded",
+        });
+    }
+
+    return checks;
+}
+
 } // namespace getgresql::pg
