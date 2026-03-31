@@ -1,6 +1,6 @@
 #include "api/handlers_admin.hpp"
 #include "core/expected.hpp"
-#include "html/templates.hpp"
+#include "ssr/components.hpp"
 #include "pg/catalog.hpp"
 #include "pg/monitor.hpp"
 
@@ -8,6 +8,15 @@
 #include <chrono>
 
 namespace getgresql::api {
+
+using namespace ssr;
+
+// Helper: escape a string for use in table cells (returns std::string)
+static auto escape(std::string_view s) -> std::string {
+    auto h = Html::with_capacity(s.size() + 32);
+    h.text(s);
+    return std::move(h).finish();
+}
 
 // ─── URL decode helper ──────────────────────────────────────────────
 
@@ -48,47 +57,51 @@ static auto form_value(std::string_view body, std::string_view key) -> std::stri
 auto RolesHandler::handle(Request& req, AppContext& ctx) -> Response {
     auto conn = ctx.pool.checkout();
     if (!conn) {
-        return Response::html(html::page("Roles", "Dashboard",
-            html::alert(error_message(conn.error()), "error")));
+        return Response::html(render_page("Roles", "Dashboard", [&](Html& h) {
+            Alert::render({error_message(conn.error()), "error"}, h);
+        }));
     }
 
     auto roles = pg::list_roles(conn->get());
     if (!roles) {
-        return Response::html(html::page("Roles", "Dashboard",
-            html::alert(error_message(roles.error()), "error")));
+        return Response::html(render_page("Roles", "Dashboard", [&](Html& h) {
+            Alert::render({error_message(roles.error()), "error"}, h);
+        }));
     }
 
-    std::string content;
-    content += html::table_begin({
+    auto h = Html::with_capacity(8192);
+    Table::begin(h, {{
         {"Name", "", true}, {"Superuser", ""}, {"Login", ""}, {"Create DB", ""},
         {"Create Role", ""}, {"Connection Limit", "num", true}, {"Valid Until", ""},
         {"Member Of", ""}
-    });
+    }});
 
     for (auto& r : *roles) {
         auto bool_badge = [](bool val) -> std::string {
-            return val ? html::badge("YES", "success") : html::badge("NO", "secondary");
+            return val ? render_to_string<Badge>({"YES", "success"}) : render_to_string<Badge>({"NO", "secondary"});
         };
 
         auto conn_limit = r.connection_limit < 0
             ? std::string("unlimited")
             : std::to_string(r.connection_limit);
 
-        content += html::table_row({
-            std::format("<strong>{}</strong>", html::escape(r.name)),
+        Table::row(h, {{
+            std::format("<strong>{}</strong>", escape(r.name)),
             bool_badge(r.is_superuser),
             bool_badge(r.can_login),
             bool_badge(r.can_create_db),
             bool_badge(r.can_create_role),
             conn_limit,
-            r.valid_until.empty() ? std::string("&mdash;") : html::escape(r.valid_until),
-            r.member_of.empty() ? std::string("&mdash;") : html::escape(r.member_of),
-        });
+            r.valid_until.empty() ? std::string("&mdash;") : escape(r.valid_until),
+            r.member_of.empty() ? std::string("&mdash;") : escape(r.member_of),
+        }});
     }
-    content += html::table_end();
+    Table::end(h);
 
-    if (req.is_htmx()) return Response::html(html::partial(std::move(content)));
-    return Response::html(html::page("Roles", "Dashboard", std::move(content)));
+    if (req.is_htmx()) return Response::html(std::move(h).finish());
+    return Response::html(render_page("Roles", "Dashboard", [&](Html& ph) {
+        ph.raw(h.view());
+    }));
 }
 
 // ─── ExtensionsHandler ──────────────────────────────────────────────
@@ -96,39 +109,44 @@ auto RolesHandler::handle(Request& req, AppContext& ctx) -> Response {
 auto ExtensionsHandler::handle(Request& req, AppContext& ctx) -> Response {
     auto conn = ctx.pool.checkout();
     if (!conn) {
-        return Response::html(html::page("Extensions", "Dashboard",
-            html::alert(error_message(conn.error()), "error")));
+        return Response::html(render_page("Extensions", "Dashboard", [&](Html& h) {
+            Alert::render({error_message(conn.error()), "error"}, h);
+        }));
     }
 
     auto exts = pg::list_extensions(conn->get());
     if (!exts) {
-        return Response::html(html::page("Extensions", "Dashboard",
-            html::alert(error_message(exts.error()), "error")));
+        return Response::html(render_page("Extensions", "Dashboard", [&](Html& h) {
+            Alert::render({error_message(exts.error()), "error"}, h);
+        }));
     }
 
-    std::string content;
-    content += html::table_begin({
+    auto h = Html::with_capacity(8192);
+    Table::begin(h, {{
         {"Name", "", true}, {"Version", "", true}, {"Schema", "", true}, {"Description", "wide"}
-    });
+    }});
 
     for (auto& e : *exts) {
-        content += html::table_row({
-            std::format("<strong>{}</strong>", html::escape(e.name)),
-            html::badge(e.version, "secondary"),
-            html::escape(e.schema),
-            html::escape(e.description),
-        });
+        Table::row(h, {{
+            std::format("<strong>{}</strong>", escape(e.name)),
+            render_to_string<Badge>({e.version, "secondary"}),
+            escape(e.schema),
+            escape(e.description),
+        }});
     }
-    content += html::table_end();
+    Table::end(h);
 
-    if (req.is_htmx()) return Response::html(html::partial(std::move(content)));
-    return Response::html(html::page("Extensions", "Dashboard", std::move(content)));
+    if (req.is_htmx()) return Response::html(std::move(h).finish());
+    return Response::html(render_page("Extensions", "Dashboard", [&](Html& ph) {
+        ph.raw(h.view());
+    }));
 }
 
 // ─── SettingsHandler ────────────────────────────────────────────────
 
 auto SettingsHandler::handle(Request& req, AppContext& /*ctx*/) -> Response {
-    std::string content = R"(
+    auto h = Html::with_capacity(4096);
+    h.raw(R"(
 <div class="search-box">
     <input type="search" name="q" placeholder="Search settings..."
         hx-get="/settings/search" hx-trigger="input changed delay:300ms"
@@ -137,21 +155,23 @@ auto SettingsHandler::handle(Request& req, AppContext& /*ctx*/) -> Response {
 <div id="settings-results" hx-get="/settings/search" hx-trigger="load">
     <div class="loading">Loading settings...</div>
 </div>
-)";
+)");
 
-    if (req.is_htmx()) return Response::html(html::partial(std::move(content)));
-    return Response::html(html::page("Settings", "Dashboard", std::move(content)));
+    if (req.is_htmx()) return Response::html(std::move(h).finish());
+    return Response::html(render_page("Settings", "Dashboard", [&](Html& ph) {
+        ph.raw(h.view());
+    }));
 }
 
 // ─── SettingsSearchHandler ──────────────────────────────────────────
 
 auto SettingsSearchHandler::handle(Request& req, AppContext& ctx) -> Response {
     auto conn = ctx.pool.checkout();
-    if (!conn) return Response::html(html::alert(error_message(conn.error()), "error"));
+    if (!conn) return Response::html(render_to_string<Alert>({error_message(conn.error()), "error"}));
 
     auto search = req.query("q");
     auto settings = pg::server_settings(conn->get(), search);
-    if (!settings) return Response::html(html::alert(error_message(settings.error()), "error"));
+    if (!settings) return Response::html(render_to_string<Alert>({error_message(settings.error()), "error"}));
 
     if (settings->empty()) {
         return Response::html(R"(<div class="empty-state">No settings found</div>)");
@@ -159,21 +179,21 @@ auto SettingsSearchHandler::handle(Request& req, AppContext& ctx) -> Response {
 
     // Group by category
     std::string current_category;
-    std::string content;
+    auto h = Html::with_capacity(16384);
 
     bool table_open = false;
 
     for (auto& s : *settings) {
         if (s.category != current_category) {
             if (table_open) {
-                content += html::table_end();
+                Table::end(h);
             }
             current_category = s.category;
-            content += std::format("<h4>{}</h4>", html::escape(current_category));
-            content += html::table_begin({
+            h.raw("<h4>").text(current_category).raw("</h4>");
+            Table::begin(h, {{
                 {"Name", ""}, {"Value", ""}, {"Source", ""}, {"Context", ""},
                 {"Description", "wide"}
-            });
+            }});
             table_open = true;
         }
 
@@ -184,23 +204,23 @@ auto SettingsSearchHandler::handle(Request& req, AppContext& ctx) -> Response {
             s.context == "user"       ? "success" : "secondary";
 
         auto value_str = s.unit.empty()
-            ? html::escape(s.setting)
-            : std::format("{} {}", html::escape(s.setting), html::escape(s.unit));
+            ? escape(s.setting)
+            : std::format("{} {}", escape(s.setting), escape(s.unit));
 
-        content += html::table_row({
-            std::format("<code>{}</code>", html::escape(s.name)),
+        Table::row(h, {{
+            std::format("<code>{}</code>", escape(s.name)),
             std::format("<code>{}</code>", value_str),
-            html::escape(s.source),
-            html::badge(s.context, context_variant),
-            html::escape(s.short_desc),
-        });
+            escape(s.source),
+            render_to_string<Badge>({s.context, context_variant}),
+            escape(s.short_desc),
+        }});
     }
 
     if (table_open) {
-        content += html::table_end();
+        Table::end(h);
     }
 
-    return Response::html(html::partial(std::move(content)));
+    return Response::html(std::move(h).finish());
 }
 
 // ─── FunctionListHandler ────────────────────────────────────────────
@@ -215,18 +235,19 @@ auto FunctionListHandler::handle(Request& req, AppContext& ctx) -> Response {
     auto funcs = pg::list_functions(conn->get(), schema_name);
     if (!funcs) return Response::error(error_message(funcs.error()));
 
-    std::string content;
-    content += html::breadcrumbs({
+    auto h = Html::with_capacity(8192);
+    std::vector<Crumb> crumbs = {
         {"Databases", "/databases"},
         {std::string(db_name), std::format("/db/{}/schemas", db_name)},
         {std::string(schema_name), std::format("/db/{}/schema/{}/tables", db_name, schema_name)},
         {"Functions", ""},
-    });
+    };
+    Breadcrumbs::render(crumbs, h);
 
-    content += html::table_begin({
+    Table::begin(h, {{
         {"Name", "", true}, {"Arguments", "wide"}, {"Return Type", "", true},
         {"Language", "", true}, {"Volatility", ""}
-    });
+    }});
 
     for (auto& f : *funcs) {
         auto lang_variant =
@@ -234,21 +255,23 @@ auto FunctionListHandler::handle(Request& req, AppContext& ctx) -> Response {
             f.language == "sql"     ? "success" :
             f.language == "c"       ? "danger"  : "secondary";
 
-        content += html::table_row({
+        Table::row(h, {{
             std::format("<a href=\"/db/{}/schema/{}/function/{}\">{}</a>",
-                html::escape(db_name), html::escape(schema_name),
-                html::escape(f.name), html::escape(f.name)),
-            std::format("<code>{}</code>", html::escape(f.arguments)),
-            html::escape(f.return_type),
-            html::badge(f.language, lang_variant),
-            html::badge(f.volatility, "secondary"),
-        });
+                escape(db_name), escape(schema_name),
+                escape(f.name), escape(f.name)),
+            std::format("<code>{}</code>", escape(f.arguments)),
+            escape(f.return_type),
+            render_to_string<Badge>({f.language, lang_variant}),
+            render_to_string<Badge>({f.volatility, "secondary"}),
+        }});
     }
-    content += html::table_end();
+    Table::end(h);
 
     auto title = std::format("Functions - {}.{}", db_name, schema_name);
-    if (req.is_htmx()) return Response::html(html::partial(std::move(content)));
-    return Response::html(html::page(title, "Dashboard", std::move(content)));
+    if (req.is_htmx()) return Response::html(std::move(h).finish());
+    return Response::html(render_page(title, "Dashboard", [&](Html& ph) {
+        ph.raw(h.view());
+    }));
 }
 
 // ─── FunctionDetailHandler ──────────────────────────────────────────
@@ -264,28 +287,31 @@ auto FunctionDetailHandler::handle(Request& req, AppContext& ctx) -> Response {
     auto source = pg::get_function_source(conn->get(), schema_name, func_name);
     if (!source) return Response::error(error_message(source.error()));
 
-    std::string content;
-    content += html::breadcrumbs({
+    auto h = Html::with_capacity(8192);
+    std::vector<Crumb> crumbs = {
         {"Databases", "/databases"},
         {std::string(db_name), std::format("/db/{}/schemas", db_name)},
         {std::string(schema_name), std::format("/db/{}/schema/{}/tables", db_name, schema_name)},
         {"Functions", std::format("/db/{}/schema/{}/functions", db_name, schema_name)},
         {std::string(func_name), ""},
-    });
+    };
+    Breadcrumbs::render(crumbs, h);
 
-    content += std::format("<p><strong>Language:</strong> {}</p>", html::badge(source->language, "primary"));
+    h.raw("<p><strong>Language:</strong> ").raw(render_to_string<Badge>({source->language, "primary"})).raw("</p>");
 
-    content += "<h3>Source</h3>";
-    content += std::format("<div class=\"function-source\">{}</div>", html::escape(source->source));
+    h.raw("<h3>Source</h3>");
+    h.raw("<div class=\"function-source\">").text(source->source).raw("</div>");
 
     if (!source->definition.empty()) {
-        content += "<h3>Full Definition</h3>";
-        content += std::format("<div class=\"function-source\">{}</div>", html::escape(source->definition));
+        h.raw("<h3>Full Definition</h3>");
+        h.raw("<div class=\"function-source\">").text(source->definition).raw("</div>");
     }
 
     auto title = std::format("Function: {}", func_name);
-    if (req.is_htmx()) return Response::html(html::partial(std::move(content)));
-    return Response::html(html::page(title, "Dashboard", std::move(content)));
+    if (req.is_htmx()) return Response::html(std::move(h).finish());
+    return Response::html(render_page(title, "Dashboard", [&](Html& ph) {
+        ph.raw(h.view());
+    }));
 }
 
 // ─── SequenceListHandler ────────────────────────────────────────────
@@ -300,36 +326,39 @@ auto SequenceListHandler::handle(Request& req, AppContext& ctx) -> Response {
     auto seqs = pg::list_sequences(conn->get(), schema_name);
     if (!seqs) return Response::error(error_message(seqs.error()));
 
-    std::string content;
-    content += html::breadcrumbs({
+    auto h = Html::with_capacity(8192);
+    std::vector<Crumb> crumbs = {
         {"Databases", "/databases"},
         {std::string(db_name), std::format("/db/{}/schemas", db_name)},
         {std::string(schema_name), std::format("/db/{}/schema/{}/tables", db_name, schema_name)},
         {"Sequences", ""},
-    });
+    };
+    Breadcrumbs::render(crumbs, h);
 
-    content += html::table_begin({
+    Table::begin(h, {{
         {"Name", "", true}, {"Type", ""}, {"Current Value", "num", true}, {"Start", "num", true},
         {"Increment", "num", true}, {"Min", "num", true}, {"Max", "num", true}, {"Cycle", ""}
-    });
+    }});
 
     for (auto& s : *seqs) {
-        content += html::table_row({
-            std::format("<strong>{}</strong>", html::escape(s.name)),
-            html::badge(s.data_type, "secondary"),
+        Table::row(h, {{
+            std::format("<strong>{}</strong>", escape(s.name)),
+            render_to_string<Badge>({s.data_type, "secondary"}),
             std::to_string(s.current_value),
             std::to_string(s.start_value),
             std::to_string(s.increment),
             std::to_string(s.min_value),
             std::to_string(s.max_value),
-            s.cycle ? html::badge("YES", "success") : html::badge("NO", "secondary"),
-        });
+            s.cycle ? render_to_string<Badge>({"YES", "success"}) : render_to_string<Badge>({"NO", "secondary"}),
+        }});
     }
-    content += html::table_end();
+    Table::end(h);
 
     auto title = std::format("Sequences - {}.{}", db_name, schema_name);
-    if (req.is_htmx()) return Response::html(html::partial(std::move(content)));
-    return Response::html(html::page(title, "Dashboard", std::move(content)));
+    if (req.is_htmx()) return Response::html(std::move(h).finish());
+    return Response::html(render_page(title, "Dashboard", [&](Html& ph) {
+        ph.raw(h.view());
+    }));
 }
 
 // ─── IndexAnalysisHandler ───────────────────────────────────────────
@@ -344,18 +373,19 @@ auto IndexAnalysisHandler::handle(Request& req, AppContext& ctx) -> Response {
     auto indexes = pg::index_usage_stats(conn->get(), schema_name);
     if (!indexes) return Response::error(error_message(indexes.error()));
 
-    std::string content;
-    content += html::breadcrumbs({
+    auto h = Html::with_capacity(8192);
+    std::vector<Crumb> crumbs = {
         {"Databases", "/databases"},
         {std::string(db_name), std::format("/db/{}/schemas", db_name)},
         {std::string(schema_name), std::format("/db/{}/schema/{}/tables", db_name, schema_name)},
         {"Index Analysis", ""},
-    });
+    };
+    Breadcrumbs::render(crumbs, h);
 
-    content += html::table_begin({
+    Table::begin(h, {{
         {"Index", "", true}, {"Table", "", true}, {"Size", "num", true}, {"Scans", "num", true},
         {"Tuples Read", "num", true}, {"Tuples Fetched", "num", true}
-    });
+    }});
 
     for (auto& idx : *indexes) {
         auto row_attrs = idx.idx_scan == 0
@@ -363,23 +393,25 @@ auto IndexAnalysisHandler::handle(Request& req, AppContext& ctx) -> Response {
             : std::string_view("");
 
         auto name_cell = idx.idx_scan == 0
-            ? std::format("{} {}", html::escape(idx.index_name), html::badge("UNUSED", "warning"))
-            : html::escape(idx.index_name);
+            ? std::format("{} {}", escape(idx.index_name), render_to_string<Badge>({"UNUSED", "warning"}))
+            : escape(idx.index_name);
 
-        content += html::table_row({
+        Table::row(h, {{
             name_cell,
-            html::escape(idx.table),
-            html::escape(idx.index_size),
+            escape(idx.table),
+            escape(idx.index_size),
             std::to_string(idx.idx_scan),
             std::to_string(idx.idx_tup_read),
             std::to_string(idx.idx_tup_fetch),
-        }, row_attrs);
+        }}, row_attrs);
     }
-    content += html::table_end();
+    Table::end(h);
 
     auto title = std::format("Index Analysis - {}.{}", db_name, schema_name);
-    if (req.is_htmx()) return Response::html(html::partial(std::move(content)));
-    return Response::html(html::page(title, "Dashboard", std::move(content)));
+    if (req.is_htmx()) return Response::html(std::move(h).finish());
+    return Response::html(render_page(title, "Dashboard", [&](Html& ph) {
+        ph.raw(h.view());
+    }));
 }
 
 // ─── DatabaseSizeHandler ────────────────────────────────────────────
@@ -393,12 +425,13 @@ auto DatabaseSizeHandler::handle(Request& req, AppContext& ctx) -> Response {
     auto breakdown = pg::database_size_breakdown(conn->get());
     if (!breakdown) return Response::error(error_message(breakdown.error()));
 
-    std::string content;
-    content += html::breadcrumbs({
+    auto h = Html::with_capacity(8192);
+    std::vector<Crumb> crumbs = {
         {"Databases", "/databases"},
         {std::string(db_name), std::format("/db/{}/schemas", db_name)},
         {"Size Breakdown", ""},
-    });
+    };
+    Breadcrumbs::render(crumbs, h);
 
     // Calculate total size
     long long total_bytes = 0;
@@ -417,30 +450,32 @@ auto DatabaseSizeHandler::handle(Request& req, AppContext& ctx) -> Response {
         return std::format("{} B", bytes);
     };
 
-    content += R"(<div class="stat-grid">)";
-    content += html::stat_card("Total Size", format_size(total_bytes));
-    content += html::stat_card("Tables", std::to_string(total_tables));
-    content += html::stat_card("Indexes", std::to_string(total_indexes));
-    content += html::stat_card("Schemas", std::to_string(breakdown->size()));
-    content += "</div>";
+    h.raw("<div class=\"stat-grid\">");
+    StatCard::render({"Total Size", format_size(total_bytes)}, h);
+    StatCard::render({"Tables", std::to_string(total_tables)}, h);
+    StatCard::render({"Indexes", std::to_string(total_indexes)}, h);
+    StatCard::render({"Schemas", std::to_string(breakdown->size())}, h);
+    h.raw("</div>");
 
-    content += html::table_begin({
+    Table::begin(h, {{
         {"Schema", "", true}, {"Size", "num", true}, {"Tables", "num", true}, {"Indexes", "num", true}
-    });
+    }});
 
     for (auto& s : *breakdown) {
-        content += html::table_row({
-            html::escape(s.schema),
-            html::escape(s.size),
+        Table::row(h, {{
+            escape(s.schema),
+            escape(s.size),
             std::to_string(s.table_count),
             std::to_string(s.index_count),
-        });
+        }});
     }
-    content += html::table_end();
+    Table::end(h);
 
     auto title = std::format("Size - {}", db_name);
-    if (req.is_htmx()) return Response::html(html::partial(std::move(content)));
-    return Response::html(html::page(title, "Dashboard", std::move(content)));
+    if (req.is_htmx()) return Response::html(std::move(h).finish());
+    return Response::html(render_page(title, "Dashboard", [&](Html& ph) {
+        ph.raw(h.view());
+    }));
 }
 
 // ─── ReplicationHandler ─────────────────────────────────────────────
@@ -448,47 +483,52 @@ auto DatabaseSizeHandler::handle(Request& req, AppContext& ctx) -> Response {
 auto ReplicationHandler::handle(Request& req, AppContext& ctx) -> Response {
     auto conn = ctx.pool.checkout();
     if (!conn) {
-        return Response::html(html::page("Replication", "Monitor",
-            html::alert(error_message(conn.error()), "error")));
+        return Response::html(render_page("Replication", "Monitor", [&](Html& h) {
+            Alert::render({error_message(conn.error()), "error"}, h);
+        }));
     }
 
     auto slots = pg::replication_slots(conn->get());
     if (!slots) {
-        return Response::html(html::page("Replication", "Monitor",
-            html::alert(error_message(slots.error()), "error")));
+        return Response::html(render_page("Replication", "Monitor", [&](Html& h) {
+            Alert::render({error_message(slots.error()), "error"}, h);
+        }));
     }
 
-    std::string content;
+    auto h = Html::with_capacity(8192);
 
     if (slots->empty()) {
-        content = R"(<div class="empty-state">No replication slots configured</div>)";
+        h.raw(R"(<div class="empty-state">No replication slots configured</div>)");
     } else {
-        content += html::table_begin({
+        Table::begin(h, {{
             {"Slot Name", "", true}, {"Type", ""}, {"Database", "", true}, {"Active", ""},
             {"Restart LSN", ""}, {"Confirmed Flush LSN", ""}
-        });
+        }});
 
         for (auto& s : *slots) {
-            content += html::table_row({
-                std::format("<strong>{}</strong>", html::escape(s.slot_name)),
-                html::badge(s.slot_type, "secondary"),
-                html::escape(s.database),
-                s.active ? html::badge("YES", "success") : html::badge("NO", "danger"),
-                s.restart_lsn.empty() ? std::string("&mdash;") : std::format("<code>{}</code>", html::escape(s.restart_lsn)),
-                s.confirmed_flush_lsn.empty() ? std::string("&mdash;") : std::format("<code>{}</code>", html::escape(s.confirmed_flush_lsn)),
-            });
+            Table::row(h, {{
+                std::format("<strong>{}</strong>", escape(s.slot_name)),
+                render_to_string<Badge>({s.slot_type, "secondary"}),
+                escape(s.database),
+                s.active ? render_to_string<Badge>({"YES", "success"}) : render_to_string<Badge>({"NO", "danger"}),
+                s.restart_lsn.empty() ? std::string("&mdash;") : std::format("<code>{}</code>", escape(s.restart_lsn)),
+                s.confirmed_flush_lsn.empty() ? std::string("&mdash;") : std::format("<code>{}</code>", escape(s.confirmed_flush_lsn)),
+            }});
         }
-        content += html::table_end();
+        Table::end(h);
     }
 
-    if (req.is_htmx()) return Response::html(html::partial(std::move(content)));
-    return Response::html(html::page("Replication", "Monitor", std::move(content)));
+    if (req.is_htmx()) return Response::html(std::move(h).finish());
+    return Response::html(render_page("Replication", "Monitor", [&](Html& ph) {
+        ph.raw(h.view());
+    }));
 }
 
 // ─── TableStatsHandler ──────────────────────────────────────────────
 
 auto TableStatsHandler::handle(Request& req, AppContext& /*ctx*/) -> Response {
-    std::string content = R"(
+    auto h = Html::with_capacity(4096);
+    h.raw(R"(
 <div class="schema-selector">
     <label for="schema-select">Schema:</label>
     <input type="text" id="schema-select" name="schema" value="public"
@@ -498,41 +538,43 @@ auto TableStatsHandler::handle(Request& req, AppContext& /*ctx*/) -> Response {
 <div id="tablestats-results" hx-get="/monitor/tablestats/data?schema=public" hx-trigger="load">
     <div class="loading">Loading table statistics...</div>
 </div>
-)";
+)");
 
-    if (req.is_htmx()) return Response::html(html::partial(std::move(content)));
-    return Response::html(html::page("Table Statistics", "Monitor", std::move(content)));
+    if (req.is_htmx()) return Response::html(std::move(h).finish());
+    return Response::html(render_page("Table Statistics", "Monitor", [&](Html& ph) {
+        ph.raw(h.view());
+    }));
 }
 
 // ─── TableStatsDataHandler ──────────────────────────────────────────
 
 auto TableStatsDataHandler::handle(Request& req, AppContext& ctx) -> Response {
     auto conn = ctx.pool.checkout();
-    if (!conn) return Response::html(html::alert(error_message(conn.error()), "error"));
+    if (!conn) return Response::html(render_to_string<Alert>({error_message(conn.error()), "error"}));
 
     auto schema = req.query("schema");
     if (schema.empty()) schema = "public";
 
     auto stats = pg::table_stats(conn->get(), schema);
-    if (!stats) return Response::html(html::alert(error_message(stats.error()), "error"));
+    if (!stats) return Response::html(render_to_string<Alert>({error_message(stats.error()), "error"}));
 
     if (stats->empty()) {
         return Response::html(R"(<div class="empty-state">No tables found in this schema</div>)");
     }
 
-    std::string content;
-    content += html::table_begin({
+    auto h = Html::with_capacity(16384);
+    Table::begin(h, {{
         {"Table", "", true}, {"Seq Scans", "num", true}, {"Idx Scans", "num", true},
         {"Inserts", "num", true}, {"Updates", "num", true}, {"Deletes", "num", true},
         {"Live Rows", "num", true}, {"Dead Rows", "num", true},
         {"Last Vacuum", ""}, {"Last Analyze", ""}
-    });
+    }});
 
     for (auto& t : *stats) {
         bool high_dead = t.n_live_tup > 0 && t.n_dead_tup > static_cast<long long>(static_cast<double>(t.n_live_tup) * 0.1);
 
         auto dead_cell = high_dead
-            ? std::format("{} {}", std::to_string(t.n_dead_tup), html::badge("HIGH", "warning"))
+            ? std::format("{} {}", std::to_string(t.n_dead_tup), render_to_string<Badge>({"HIGH", "warning"}))
             : std::to_string(t.n_dead_tup);
 
         auto row_attrs = high_dead
@@ -540,11 +582,11 @@ auto TableStatsDataHandler::handle(Request& req, AppContext& ctx) -> Response {
             : std::string_view("");
 
         auto last_vacuum = t.last_vacuum.empty()
-            ? (t.last_autovacuum.empty() ? std::string("&mdash;") : html::escape(t.last_autovacuum))
-            : html::escape(t.last_vacuum);
+            ? (t.last_autovacuum.empty() ? std::string("&mdash;") : escape(t.last_autovacuum))
+            : escape(t.last_vacuum);
 
-        content += html::table_row({
-            std::format("<strong>{}</strong>", html::escape(t.table)),
+        Table::row(h, {{
+            std::format("<strong>{}</strong>", escape(t.table)),
             std::to_string(t.seq_scan),
             std::to_string(t.idx_scan),
             std::to_string(t.n_tup_ins),
@@ -553,12 +595,12 @@ auto TableStatsDataHandler::handle(Request& req, AppContext& ctx) -> Response {
             std::to_string(t.n_live_tup),
             dead_cell,
             last_vacuum,
-            t.last_analyze.empty() ? std::string("&mdash;") : html::escape(t.last_analyze),
-        }, row_attrs);
+            t.last_analyze.empty() ? std::string("&mdash;") : escape(t.last_analyze),
+        }}, row_attrs);
     }
-    content += html::table_end();
+    Table::end(h);
 
-    return Response::html(html::partial(std::move(content)));
+    return Response::html(std::move(h).finish());
 }
 
 // ─── TerminateHandler ───────────────────────────────────────────────
@@ -574,20 +616,22 @@ auto TerminateHandler::handle(Request& req, AppContext& ctx) -> Response {
 
     auto result = pg::terminate_backend(conn->get(), pid);
     if (!result) {
-        return Response::html(html::alert(error_message(result.error()), "error"));
+        return Response::html(render_to_string<Alert>({error_message(result.error()), "error"}));
     }
 
-    return Response::html(html::alert(std::format("Terminated backend PID {}", pid), "info"));
+    return Response::html(render_to_string<Alert>({std::format("Terminated backend PID {}", pid), "info"}));
 }
 
 // ─── ExplainPageHandler ─────────────────────────────────────────────
 
 auto ExplainPageHandler::handle(Request& req, AppContext& /*ctx*/) -> Response {
-    // Uses the same JS editor engine as the Query page, but in "explain" mode
-    std::string content = R"(<div id="query-workspace" class="query-panel" data-mode="explain"></div>)";
+    auto h = Html::with_capacity(4096);
+    h.raw(R"(<div id="query-workspace" class="query-panel" data-mode="explain"></div>)");
 
-    if (req.is_htmx()) return Response::html(html::partial(std::move(content)));
-    return Response::html(html::ide_page_full("Explain", "Explain", std::move(content)));
+    if (req.is_htmx()) return Response::html(std::move(h).finish());
+    return Response::html(render_page_full("Explain", "Explain", [&](Html& ph) {
+        ph.raw(h.view());
+    }));
 }
 
 // ─── ExplainExecHandler ─────────────────────────────────────────────
@@ -600,12 +644,12 @@ auto ExplainExecHandler::handle(Request& req, AppContext& ctx) -> Response {
     bool analyze = (analyze_str == "true");
 
     if (sql.empty()) {
-        return Response::html(html::alert("No SQL provided", "warning"));
+        return Response::html(render_to_string<Alert>({"No SQL provided", "warning"}));
     }
 
     auto conn = ctx.pool.checkout();
     if (!conn) {
-        return Response::html(html::alert(error_message(conn.error()), "error"));
+        return Response::html(render_to_string<Alert>({error_message(conn.error()), "error"}));
     }
 
     auto start = std::chrono::steady_clock::now();
@@ -614,31 +658,28 @@ auto ExplainExecHandler::handle(Request& req, AppContext& ctx) -> Response {
     auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
 
     if (!result) {
-        return Response::html(
-            std::format(R"(<div class="query-error"><strong>Error:</strong> {}</div>)",
-                html::escape(error_message(result.error())))
-        );
+        auto h = Html::with_capacity(1024);
+        h.raw(R"(<div class="query-error"><strong>Error:</strong> )").text(error_message(result.error())).raw("</div>");
+        return Response::html(std::move(h).finish());
     }
 
-    std::string content;
+    auto h = Html::with_capacity(4096);
 
     if (analyze) {
-        content += std::format(
+        h.raw(std::format(
             R"(<div class="query-info"><span class="rows-badge">Planning: {:.3f} ms</span> <span class="time-badge">Execution: {:.3f} ms</span> <span class="time-badge">Wall: {} ms</span></div>)",
             result->planning_time, result->execution_time, ms
-        );
+        ));
     } else {
-        content += std::format(
+        h.raw(std::format(
             R"(<div class="query-info"><span class="rows-badge">Cost: {:.2f}</span> <span class="time-badge">Wall: {} ms</span></div>)",
             result->total_cost, ms
-        );
+        ));
     }
 
-    content += std::format(
-        "<div style=\"padding:var(--sp-4)\"><div class=\"explain-plan\">{}</div></div>",
-        html::escape(result->plan_text));
+    h.raw("<div style=\"padding:var(--sp-4)\"><div class=\"explain-plan\">").text(result->plan_text).raw("</div></div>");
 
-    return Response::html(std::move(content));
+    return Response::html(std::move(h).finish());
 }
 
 } // namespace getgresql::api

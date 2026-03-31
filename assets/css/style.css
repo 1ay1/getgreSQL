@@ -1577,6 +1577,144 @@ pre code {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
+   Transitions & Animations — SPA feel
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* SPA page transitions */
+.spa-exit {
+    opacity: 0;
+    transform: translateY(4px);
+    transition: opacity 0.12s ease-out, transform 0.12s ease-out;
+}
+
+.spa-enter {
+    opacity: 0;
+    transform: translateY(8px);
+}
+
+.content {
+    transition: opacity 0.15s ease-out, transform 0.15s ease-out;
+}
+
+/* htmx swap transitions */
+.htmx-swapping { opacity: 0; transition: opacity 0.1s ease-out; }
+.htmx-settling { transition: opacity 0.15s ease-in; }
+.htmx-added { opacity: 0; animation: fadeSlideIn 0.2s ease-out forwards; }
+
+@keyframes fadeSlideIn {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* Modal transitions */
+.command-overlay {
+    animation: overlayFadeIn 0.15s ease-out;
+}
+@keyframes overlayFadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+.command-palette, .settings-panel, .cell-modal {
+    animation: modalSlideIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes modalSlideIn {
+    from { opacity: 0; transform: translateY(-10px) scale(0.97); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* Tree expand/collapse */
+.tree-children {
+    overflow: hidden;
+    animation: treeExpand 0.15s ease-out;
+}
+@keyframes treeExpand {
+    from { opacity: 0; max-height: 0; }
+    to { opacity: 1; max-height: 2000px; }
+}
+
+.tree-chevron {
+    transition: transform 0.15s ease-out;
+}
+
+/* Tab content swap */
+#tab-content, #monitor-content {
+    animation: fadeSlideIn 0.15s ease-out;
+}
+
+/* Stat card entrance */
+.stat-grid .stat-card {
+    animation: fadeSlideIn 0.2s ease-out backwards;
+}
+.stat-grid .stat-card:nth-child(1) { animation-delay: 0s; }
+.stat-grid .stat-card:nth-child(2) { animation-delay: 0.03s; }
+.stat-grid .stat-card:nth-child(3) { animation-delay: 0.06s; }
+.stat-grid .stat-card:nth-child(4) { animation-delay: 0.09s; }
+.stat-grid .stat-card:nth-child(5) { animation-delay: 0.12s; }
+.stat-grid .stat-card:nth-child(6) { animation-delay: 0.15s; }
+.stat-grid .stat-card:nth-child(7) { animation-delay: 0.18s; }
+.stat-grid .stat-card:nth-child(8) { animation-delay: 0.21s; }
+
+/* Health card entrance */
+.health-grid .health-card {
+    animation: fadeSlideIn 0.2s ease-out backwards;
+}
+.health-grid .health-card:nth-child(1) { animation-delay: 0s; }
+.health-grid .health-card:nth-child(2) { animation-delay: 0.04s; }
+.health-grid .health-card:nth-child(3) { animation-delay: 0.08s; }
+.health-grid .health-card:nth-child(4) { animation-delay: 0.12s; }
+.health-grid .health-card:nth-child(5) { animation-delay: 0.16s; }
+.health-grid .health-card:nth-child(6) { animation-delay: 0.2s; }
+
+/* Table row entrance (subtle) */
+tbody tr {
+    animation: rowFadeIn 0.1s ease-out backwards;
+}
+@keyframes rowFadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+/* Alert entrance */
+.alert {
+    animation: fadeSlideIn 0.2s ease-out;
+}
+
+/* Autocomplete popup */
+.ac-popup {
+    animation: acPopIn 0.1s ease-out;
+}
+@keyframes acPopIn {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* Smooth scrolling in content areas */
+.content, .sidebar-tree, .query-results {
+    scroll-behavior: smooth;
+}
+
+/* Progress bar animation */
+.progress-bar, .size-bar-fill, .explain-cost-fill, .col-stat-bar {
+    transition: width 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Badge pop-in */
+.badge {
+    animation: badgeIn 0.15s ease-out;
+}
+@keyframes badgeIn {
+    from { transform: scale(0.8); opacity: 0; }
+    to { transform: scale(1); opacity: 1; }
+}
+
+/* Cell save flash (smoother) */
+@keyframes cellSaveFlash {
+    0% { background: rgba(63, 185, 80, 0.3); box-shadow: 0 0 8px rgba(63, 185, 80, 0.2); }
+    100% { background: transparent; box-shadow: none; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
    SQL Editor — syntax highlighting, autocomplete, tabs, find bar
    ═══════════════════════════════════════════════════════════════════════ */
 

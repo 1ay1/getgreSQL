@@ -441,57 +441,65 @@ function toggleSidebar() {
         var workspace = document.querySelector('.workspace');
         if (!workspace) { window.location = url; return; }
 
-        // Visual loading feedback
-        workspace.style.opacity = '0.5';
-        workspace.style.pointerEvents = 'none';
+        // Phase 1: fade out current content
+        var content = workspace.querySelector('.content') || workspace;
+        content.classList.add('spa-exit');
 
-        fetch(url, { headers: { 'X-SPA': '1' } })
+        // Fetch while animating out
+        var fetchPromise = fetch(url, { headers: { 'X-SPA': '1' } })
             .then(function(r) {
                 if (!r.ok) throw new Error(r.status);
                 return r.text();
-            })
-            .then(function(html) {
+            });
+
+        // Wait for both animation and fetch
+        var animDone = new Promise(function(resolve) { setTimeout(resolve, 120); });
+
+        Promise.all([fetchPromise, animDone])
+            .then(function(results) {
+                var html = results[0];
                 var parser = new DOMParser();
                 var doc = parser.parseFromString(html, 'text/html');
 
-                // Extract new workspace
                 var newWorkspace = doc.querySelector('.workspace');
                 if (!newWorkspace) { window.location = url; return; }
 
-                // Swap workspace
+                // Phase 2: swap and fade in
                 workspace.outerHTML = newWorkspace.outerHTML;
 
-                // Update document title
+                var ws = document.querySelector('.workspace');
+                var newContent = ws.querySelector('.content') || ws;
+                newContent.classList.add('spa-enter');
+                requestAnimationFrame(function() {
+                    requestAnimationFrame(function() {
+                        newContent.classList.remove('spa-enter');
+                    });
+                });
+
+                // Update title
                 var newTitle = doc.querySelector('title');
                 if (newTitle) document.title = newTitle.textContent;
 
-                // Update toolbar active state
+                // Update toolbar
                 var newToolbarNav = doc.querySelector('.toolbar-nav');
                 var currentToolbarNav = document.querySelector('.toolbar-nav');
                 if (newToolbarNav && currentToolbarNav) {
                     currentToolbarNav.innerHTML = newToolbarNav.innerHTML;
                 }
 
-                // Update URL
                 if (!skipPush) history.pushState(null, '', url);
 
-                // Re-initialize htmx on new content
-                var ws = document.querySelector('.workspace');
                 if (ws && window.htmx) htmx.process(ws);
 
-                // Re-init editor if query page
                 var queryWs = document.getElementById('query-workspace');
                 if (queryWs && window.SQLEditor) SQLEditor.init(queryWs);
 
-                // Highlight active tree item
                 treeHighlightCurrent();
 
-                // Scroll content to top
-                var content = document.querySelector('.content');
-                if (content) content.scrollTop = 0;
+                var c = ws.querySelector('.content');
+                if (c) c.scrollTop = 0;
             })
             .catch(function() {
-                // Fallback to full navigation on error
                 window.location = url;
             });
     }

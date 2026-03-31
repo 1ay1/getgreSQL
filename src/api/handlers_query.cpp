@@ -1,12 +1,14 @@
 #include "api/handlers_query.hpp"
 #include "core/expected.hpp"
-#include "html/templates.hpp"
+#include "ssr/components.hpp"
 #include "pg/catalog.hpp"
 
 #include <chrono>
 #include <format>
 
 namespace getgresql::api {
+
+using namespace ssr;
 
 // ─── JSON string escaping ───────────────────────────────────────────
 
@@ -31,50 +33,55 @@ static auto json_escape(std::string_view s) -> std::string {
     return out;
 }
 
+// ─── URL decoding ───────────────────────────────────────────────────
+
+static auto url_decode(std::string_view input) -> std::string {
+    std::string decoded;
+    decoded.reserve(input.size());
+    for (std::size_t i = 0; i < input.size(); ++i) {
+        if (input[i] == '+') decoded += ' ';
+        else if (input[i] == '%' && i + 2 < input.size()) {
+            decoded += static_cast<char>(std::stoi(std::string(input.substr(i + 1, 2)), nullptr, 16));
+            i += 2;
+        } else decoded += input[i];
+    }
+    return decoded;
+}
+
+static auto form_value(std::string_view body, std::string_view key) -> std::string {
+    auto needle = std::string(key) + "=";
+    auto pos = body.find(needle);
+    if (pos == std::string_view::npos) return {};
+    auto start = pos + needle.size();
+    auto end = body.find('&', start);
+    return url_decode((end == std::string_view::npos) ? body.substr(start) : body.substr(start, end - start));
+}
+
 // ─── QueryPageHandler ───────────────────────────────────────────────
 
 auto QueryPageHandler::handle(Request& req, AppContext& /*ctx*/) -> Response {
-    // The JS editor (editor.js) takes over this container via SQLEditor.init()
-    std::string content = R"(<div id="query-workspace" class="query-panel"></div>)";
-
-    if (req.is_htmx()) return Response::html(html::partial(std::move(content)));
-    return Response::html(html::ide_page_full("Query", "Query", std::move(content)));
+    if (req.is_htmx()) {
+        return Response::html(R"(<div id="query-workspace" class="query-panel"></div>)");
+    }
+    return Response::html(render_page_full("Query", "Query", [](Html& h) {
+        h.raw(R"(<div id="query-workspace" class="query-panel"></div>)");
+    }));
 }
 
 // ─── QueryExecHandler ───────────────────────────────────────────────
 
 auto QueryExecHandler::handle(Request& req, AppContext& ctx) -> Response {
     auto body = std::string(req.body());
-    std::string sql;
-
-    auto pos = body.find("sql=");
-    if (pos != std::string::npos) {
-        sql = body.substr(pos + 4);
-        std::string decoded;
-        decoded.reserve(sql.size());
-        for (std::size_t i = 0; i < sql.size(); ++i) {
-            if (sql[i] == '+') {
-                decoded += ' ';
-            } else if (sql[i] == '%' && i + 2 < sql.size()) {
-                auto hex = sql.substr(i + 1, 2);
-                decoded += static_cast<char>(std::stoi(hex, nullptr, 16));
-                i += 2;
-            } else {
-                decoded += sql[i];
-            }
-        }
-        sql = std::move(decoded);
-    }
+    auto sql = form_value(body, "sql");
 
     if (sql.empty()) {
-        return Response::html(html::alert("No SQL provided", "warning"));
+        return Response::html(render_to_string<Alert>({"No SQL provided", "warning"}));
     }
 
     auto start = std::chrono::steady_clock::now();
-
     auto conn = ctx.pool.checkout();
     if (!conn) {
-        return Response::html(html::alert(error_message(conn.error()), "error"));
+        return Response::html(render_to_string<Alert>({error_message(conn.error()), "error"}));
     }
 
     auto result = conn->get().exec(sql);
@@ -82,94 +89,93 @@ auto QueryExecHandler::handle(Request& req, AppContext& ctx) -> Response {
     auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
 
     if (!result) {
-        auto& err = result.error();
-        return Response::html(
-            std::format("<div class=\"query-error\"><strong>Error:</strong> {}</div>",
-                html::escape(error_message(err)))
-        );
+        auto h = Html::with_capacity(1024);
+        h.raw("<div class=\"query-error\"><strong>Error:</strong> ").text(error_message(result.error())).raw("</div>");
+        return Response::html(std::move(h).finish());
     }
 
-    std::string content;
+    auto h = Html::with_capacity(16384);
 
     if (result->row_count() > 0 || result->col_count() > 0) {
-        content += std::format(
-            "<div class=\"query-info\"><span class=\"rows-badge\">{} rows</span> <span class=\"time-badge\">{} ms</span></div>",
-            result->row_count(), ms
-        );
+        // Result info bar
+        h.raw("<div class=\"query-info\"><span class=\"rows-badge\">")
+         .raw(std::to_string(result->row_count()))
+         .raw(" rows</span> <span class=\"time-badge\">")
+         .raw(std::to_string(ms))
+         .raw(" ms</span></div>");
 
-        std::vector<html::TableColumn> headers;
+        // Build column list
+        std::vector<Col> cols;
         for (int c = 0; c < result->col_count(); ++c) {
-            headers.push_back({std::string(result->column_name(c)), "", true});
+            cols.push_back({result->column_name(c), "", true});
         }
-        content += html::table_begin(headers, "results-table");
+        Table::begin(h, cols, "results-table");
 
         for (auto row : *result) {
             std::vector<std::string> cells;
             for (int c = 0; c < row.col_count(); ++c) {
                 if (row.is_null(c)) {
-                    cells.push_back("<span class=\"null-value\">NULL</span>");
+                    cells.emplace_back("<span class=\"null-value\">NULL</span>");
                 } else {
                     auto val = row[c];
+                    auto tmp = Html::with_capacity(val.size() + 16);
                     if (val.size() > 500) {
-                        cells.push_back(html::escape(val.substr(0, 500)) + "...");
+                        tmp.text(val.substr(0, 500)).raw("...");
                     } else {
-                        cells.push_back(html::escape(val));
+                        tmp.text(val);
                     }
+                    cells.push_back(std::move(tmp).finish());
                 }
             }
-            content += html::table_row(cells);
+            Table::row(h, cells);
         }
-        content += html::table_end();
+        Table::end(h);
     } else {
-        content += std::format(
-            "<div class=\"query-info\"><span class=\"rows-badge\">{} &mdash; {} affected</span> <span class=\"time-badge\">{} ms</span></div>",
-            html::escape(result->command_tag()),
-            html::escape(result->affected_rows()),
-            ms
-        );
+        // Command result (INSERT, UPDATE, etc.)
+        h.raw("<div class=\"query-info\"><span class=\"rows-badge\">")
+         .text(result->command_tag())
+         .raw(" &mdash; ").text(result->affected_rows())
+         .raw(" affected</span> <span class=\"time-badge\">")
+         .raw(std::to_string(ms)).raw(" ms</span></div>");
     }
 
-    return Response::html(std::move(content));
+    return Response::html(std::move(h).finish());
 }
 
 // ─── CompletionsHandler ─────────────────────────────────────────────
 
 auto CompletionsHandler::handle(Request& /*req*/, AppContext& ctx) -> Response {
     auto conn = ctx.pool.checkout();
-    if (!conn) {
-        return Response::json(R"({"schemas":[],"tables":[]})", 500);
-    }
+    if (!conn) return Response::json(R"({"schemas":[],"tables":[]})", 500);
 
     auto data = pg::completion_metadata(conn->get());
-    if (!data) {
-        return Response::json(R"({"schemas":[],"tables":[]})", 500);
-    }
+    if (!data) return Response::json(R"({"schemas":[],"tables":[]})", 500);
 
-    // Build JSON manually
-    std::string json = "{\"schemas\":[";
+    // JSON is data, not UI — use Html buffer for fast string building
+    auto h = Html::with_capacity(32768);
+    h.raw("{\"schemas\":[");
     for (std::size_t i = 0; i < data->schemas.size(); ++i) {
-        if (i > 0) json += ',';
-        json += '"' + json_escape(data->schemas[i]) + '"';
+        if (i > 0) h.raw(',');
+        h.raw("\"").raw(json_escape(data->schemas[i])).raw("\"");
     }
-    json += "],\"tables\":[";
-
+    h.raw("],\"tables\":[");
     for (std::size_t i = 0; i < data->tables.size(); ++i) {
-        if (i > 0) json += ',';
+        if (i > 0) h.raw(',');
         auto& t = data->tables[i];
-        json += "{\"schema\":\"" + json_escape(t.schema) + "\",";
-        json += "\"name\":\"" + json_escape(t.name) + "\",";
-        json += "\"type\":\"" + json_escape(t.type) + "\",";
-        json += "\"columns\":[";
+        h.raw("{\"schema\":\"").raw(json_escape(t.schema))
+         .raw("\",\"name\":\"").raw(json_escape(t.name))
+         .raw("\",\"type\":\"").raw(json_escape(t.type))
+         .raw("\",\"columns\":[");
         for (std::size_t j = 0; j < t.columns.size(); ++j) {
-            if (j > 0) json += ',';
-            json += "{\"name\":\"" + json_escape(t.columns[j].name) + "\",";
-            json += "\"type\":\"" + json_escape(t.columns[j].type) + "\"}";
+            if (j > 0) h.raw(',');
+            h.raw("{\"name\":\"").raw(json_escape(t.columns[j].name))
+             .raw("\",\"type\":\"").raw(json_escape(t.columns[j].type)).raw("\"}");
         }
-        json += "]}";
+        h.raw("]}");
     }
-    json += "]}";
+    h.raw("]}");
 
-    return Response::json(std::move(json));
+    return Response::json(std::move(h).finish());
 }
 
 } // namespace getgresql::api

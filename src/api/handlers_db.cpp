@@ -1,12 +1,20 @@
 #include "api/handlers_db.hpp"
 #include "core/expected.hpp"
-#include "html/templates.hpp"
+#include "ssr/components.hpp"
 #include "pg/catalog.hpp"
 #include "pg/monitor.hpp"
 
 #include <format>
 
 namespace getgresql::api {
+
+using namespace ssr;
+
+static auto escape(std::string_view s) -> std::string {
+    auto h = Html::with_capacity(s.size() + 32);
+    h.text(s);
+    return std::move(h).finish();
+}
 
 // ─── Form helpers ───────────────────────────────────────────────────
 
@@ -48,563 +56,379 @@ static auto json_escape_str(std::string_view s) -> std::string {
     return out;
 }
 
-auto IndexHandler::handle(Request& /*req*/, AppContext& ctx) -> Response {
+auto IndexHandler::handle(Request& req, AppContext& ctx) -> Response {
+    using namespace ssr;
+
     auto conn = ctx.pool.checkout();
     if (!conn) {
-        return Response::html(html::page("Error", "Dashboard",
-            html::alert(error_message(conn.error()), "error")));
+        return Response::html(render_page("Error", "Dashboard", [&](Html& h) {
+            Alert::render({error_message(conn.error()), "error"}, h);
+        }));
     }
 
+    // Fetch all data (pure queries — no side effects on Html)
     auto stats_res = pg::server_stats(conn->get());
     auto dbs_res = pg::database_sizes(conn->get());
     auto health_res = pg::health_checks(conn->get());
     auto activity_res = pg::database_activity(conn->get());
 
-    std::string content;
+    // Render: pure function from data → Html buffer
+    auto h = Html::with_capacity(16384);
 
-    // ── Health checks panel ─────────────────────────────────────────
-    if (health_res) {
-        content += "<div class=\"health-grid\">";
-        for (auto& c : *health_res) {
-            auto variant = c.status == "ok" ? "success" : c.status == "warning" ? "warning" : "danger";
-            auto icon = c.status == "ok" ? "&#10003;" : c.status == "warning" ? "&#9888;" : "&#10007;";
-            content += std::format(
-                "<div class=\"health-card health-{}\">"
-                "<div class=\"health-icon\">{}</div>"
-                "<div class=\"health-info\"><div class=\"health-name\">{}</div>"
-                "<div class=\"health-value\">{}</div>"
-                "<div class=\"health-detail\">{}</div></div></div>",
-                variant, icon, html::escape(c.name), html::escape(c.value), html::escape(c.detail)
-            );
+    PageLayout::render({"Dashboard", "Dashboard"}, h, [&](Html& h) {
+
+        // ── Health checks ───────────────────────────────────────
+        if (health_res) {
+            h.raw("<div class=\"health-grid\">");
+            for (auto& c : *health_res) {
+                HealthCard::render({c.name, c.status, c.value, c.detail}, h);
+            }
+            h.raw("</div>");
         }
-        content += "</div>";
-    }
 
-    // ── Server stats ────────────────────────────────────────────────
-    if (stats_res) {
-        auto& s = *stats_res;
-        content += "<div class=\"stat-grid\">";
-        content += html::stat_card("Active", std::to_string(s.active_connections));
-        content += html::stat_card("Idle", std::to_string(s.idle_connections));
-        content += html::stat_card("Idle in Txn", std::to_string(s.idle_in_transaction),
-                                   s.idle_in_transaction > 0 ? "warning" : "");
-        content += html::stat_card("Cache Hit", std::format("{:.1f}%", s.cache_hit_ratio * 100),
-                                   s.cache_hit_ratio < 0.90 ? "danger" : "success");
-        content += html::stat_card("Commits", std::to_string(s.total_commits));
-        content += html::stat_card("Rollbacks", std::to_string(s.total_rollbacks),
-                                   s.total_rollbacks > 0 ? "warning" : "");
-        content += html::stat_card("Max Connections", std::to_string(s.max_connections));
-        content += html::stat_card("Uptime", s.uptime, "accent");
-        content += "</div>";
-        content += "<div class=\"server-info\"><code>" + html::escape(s.version) + "</code></div>";
-    }
-
-    // ── Dashboard grid: databases + activity ────────────────────────
-    content += "<div class=\"dashboard-grid\">";
-
-    // Database sizes panel
-    if (dbs_res) {
-        long long max_size = 1;
-        for (auto& d : *dbs_res) if (d.size_bytes > max_size) max_size = d.size_bytes;
-
-        content += "<div class=\"dashboard-section\">";
-        content += "<div class=\"dashboard-section-header\">Databases</div>";
-        content += "<div class=\"dashboard-section-body\">";
-        content += "<table><thead><tr><th>Name</th><th>Size</th><th></th><th>Connections</th><th>Cache</th></tr></thead><tbody>";
-        for (auto& d : *dbs_res) {
-            auto bar_pct = static_cast<double>(d.size_bytes) / max_size * 100;
-            auto cache_variant = d.cache_hit_ratio < 0.90 ? "danger" : d.cache_hit_ratio < 0.99 ? "warning" : "success";
-            content += std::format(
-                "<tr><td><a href=\"/db/{}/schemas\"><strong>{}</strong></a></td>"
-                "<td class=\"num\">{}</td>"
-                "<td><div class=\"size-bar\"><div class=\"size-bar-fill\" style=\"width:{:.0f}%\"></div></div></td>"
-                "<td class=\"num\">{}</td>"
-                "<td>{}</td></tr>",
-                html::escape(d.name), html::escape(d.name), html::escape(d.size),
-                bar_pct, d.connections,
-                html::badge(std::format("{:.0f}%", d.cache_hit_ratio * 100), cache_variant)
-            );
+        // ── Server stats ────────────────────────────────────────
+        if (stats_res) {
+            auto& s = *stats_res;
+            auto cache_pct = std::format("{:.1f}%", s.cache_hit_ratio * 100);
+            h.raw("<div class=\"stat-grid\">");
+            StatCard::render({"Active", std::to_string(s.active_connections)}, h);
+            StatCard::render({"Idle", std::to_string(s.idle_connections)}, h);
+            StatCard::render({"Idle in Txn", std::to_string(s.idle_in_transaction),
+                             s.idle_in_transaction > 0 ? "warning" : ""}, h);
+            StatCard::render({"Cache Hit", cache_pct,
+                             s.cache_hit_ratio < 0.90 ? "danger" : "success"}, h);
+            StatCard::render({"Commits", std::to_string(s.total_commits)}, h);
+            StatCard::render({"Rollbacks", std::to_string(s.total_rollbacks),
+                             s.total_rollbacks > 0 ? "warning" : ""}, h);
+            StatCard::render({"Max Connections", std::to_string(s.max_connections)}, h);
+            StatCard::render({"Uptime", s.uptime, "accent"}, h);
+            h.raw("</div>");
+            h.raw("<div class=\"server-info\"><code>").text(s.version).raw("</code></div>");
         }
-        content += "</tbody></table></div></div>";
-    }
 
-    // Activity per database panel
-    if (activity_res) {
-        content += "<div class=\"dashboard-section\">";
-        content += "<div class=\"dashboard-section-header\">Activity by Database</div>";
-        content += "<div class=\"dashboard-section-body\">";
-        content += "<table><thead><tr><th>Database</th><th>Active</th><th>Idle</th><th>Idle Txn</th><th>Commits</th><th>Rollbacks</th></tr></thead><tbody>";
-        for (auto& a : *activity_res) {
-            content += std::format(
-                "<tr><td><strong>{}</strong></td><td class=\"num\">{}</td><td class=\"num\">{}</td>"
-                "<td class=\"num\">{}</td><td class=\"num\">{}</td><td class=\"num\">{}</td></tr>",
-                html::escape(a.database), a.active, a.idle, a.idle_in_transaction,
-                a.xact_commit, a.xact_rollback
-            );
+        // ── Dashboard grid ──────────────────────────────────────
+        h.raw("<div class=\"dashboard-grid\">");
+
+        // Databases panel
+        if (dbs_res) {
+            double max_size = 1.0;
+            for (auto& d : *dbs_res) if (static_cast<double>(d.size_bytes) > max_size) max_size = static_cast<double>(d.size_bytes);
+
+            { auto _ = scope(h, "div", "class=\"dashboard-section\"");
+                h.raw("<div class=\"dashboard-section-header\">Databases</div>");
+                { auto _ = scope(h, "div", "class=\"dashboard-section-body\"");
+                    h.raw("<table><thead><tr><th>Name</th><th>Size</th><th></th><th>Conn</th><th>Cache</th></tr></thead><tbody>");
+                    for (auto& d : *dbs_res) {
+                        auto pct = static_cast<double>(d.size_bytes) / max_size * 100;
+                        auto cache_v = d.cache_hit_ratio < 0.90 ? "danger" : d.cache_hit_ratio < 0.99 ? "warning" : "success";
+                        h.raw("<tr><td><a href=\"/db/").text(d.name).raw("/schemas\"><strong>").text(d.name).raw("</strong></a></td>");
+                        h.raw("<td class=\"num\">").text(d.size).raw("</td>");
+                        h.raw("<td>"); SizeBar::render({pct}, h); h.raw("</td>");
+                        h.raw("<td class=\"num\">").raw(std::to_string(d.connections)).raw("</td>");
+                        h.raw("<td>"); Badge::render({std::format("{:.0f}%", d.cache_hit_ratio * 100), cache_v}, h); h.raw("</td>");
+                        h.raw("</tr>");
+                    }
+                    h.raw("</tbody></table>");
+                }
+            }
         }
-        content += "</tbody></table></div></div>";
-    }
 
-    content += "</div>"; // dashboard-grid
+        // Activity panel
+        if (activity_res) {
+            { auto _ = scope(h, "div", "class=\"dashboard-section\"");
+                h.raw("<div class=\"dashboard-section-header\">Activity by Database</div>");
+                { auto _ = scope(h, "div", "class=\"dashboard-section-body\"");
+                    h.raw("<table><thead><tr><th>Database</th><th>Active</th><th>Idle</th><th>Idle Txn</th><th>Commits</th><th>Rollbacks</th></tr></thead><tbody>");
+                    for (auto& a : *activity_res) {
+                        h.raw("<tr><td><strong>").text(a.database).raw("</strong></td>");
+                        h.raw("<td class=\"num\">").raw(std::to_string(a.active)).raw("</td>");
+                        h.raw("<td class=\"num\">").raw(std::to_string(a.idle)).raw("</td>");
+                        h.raw("<td class=\"num\">").raw(std::to_string(a.idle_in_transaction)).raw("</td>");
+                        h.raw("<td class=\"num\">").raw(std::to_string(a.xact_commit)).raw("</td>");
+                        h.raw("<td class=\"num\">").raw(std::to_string(a.xact_rollback)).raw("</td>");
+                        h.raw("</tr>");
+                    }
+                    h.raw("</tbody></table>");
+                }
+            }
+        }
 
-    return Response::html(html::page("Dashboard", "Dashboard", std::move(content)));
+        h.raw("</div>"); // dashboard-grid
+    });
+
+    return Response::html(std::move(h).finish());
 }
 
 auto DatabaseListHandler::handle(Request& req, AppContext& ctx) -> Response {
     auto conn = ctx.pool.checkout();
-    if (!conn) {
-        return Response::html(html::page("Databases", "Dashboard",
-            html::alert(error_message(conn.error()), "error")));
-    }
+    if (!conn) return Response::html(render_page("Databases", "Dashboard", [&](Html& h) {
+        Alert::render({error_message(conn.error()), "error"}, h);
+    }));
 
     auto dbs = pg::list_databases(conn->get());
-    if (!dbs) {
-        return Response::html(html::page("Databases", "Dashboard",
-            html::alert(error_message(dbs.error()), "error")));
-    }
+    if (!dbs) return Response::html(render_page("Databases", "Dashboard", [&](Html& h) {
+        Alert::render({error_message(dbs.error()), "error"}, h);
+    }));
 
-    std::string content;
-    content += html::table_begin({
-        {"Name", "", true}, {"Owner", "", true}, {"Encoding", "", true},
-        {"Size", "num", true}, {"Size (bytes)", "num", true}
-    });
+    auto render = [&](Html& h) {
+        Table::begin(h, {{"Name", "", true}, {"Owner", "", true}, {"Encoding", "", true}, {"Size", "num", true}, {"Size (bytes)", "num", true}});
+        for (auto& db : *dbs) {
+            auto link = std::format("<a href=\"/db/{}/schemas\">{}</a>", escape(db.name), escape(db.name));
+            Table::row(h, {{link, escape(db.owner), escape(db.encoding), escape(db.size), std::to_string(db.size_bytes)}});
+        }
+        Table::end(h);
+    };
 
-    for (auto& db : *dbs) {
-        content += html::table_row({
-            std::format("<a href=\"/db/{}/schemas\">{}</a>", html::escape(db.name), html::escape(db.name)),
-            html::escape(db.owner),
-            html::escape(db.encoding),
-            html::escape(db.size),
-            std::to_string(db.size_bytes),
-        });
-    }
-    content += html::table_end();
-
-    if (req.is_htmx()) return Response::html(html::partial(std::move(content)));
-    return Response::html(html::page("Databases", "Dashboard", std::move(content)));
+    if (req.is_htmx()) return Response::html(render_partial(render));
+    return Response::html(render_page("Databases", "Dashboard", render));
 }
 
 auto SchemaListHandler::handle(Request& req, AppContext& ctx) -> Response {
     auto db_name = req.param("db");
-
     auto conn = ctx.pool.checkout();
     if (!conn) return Response::error(error_message(conn.error()));
-
     auto schemas = pg::list_schemas(conn->get(), db_name);
     if (!schemas) return Response::error(error_message(schemas.error()));
 
-    std::string content;
-    content += html::breadcrumbs({
-        {"Databases", "/databases"},
-        {std::string(db_name), ""},
-    });
-
-    content += html::table_begin({{"Schema", "", true}, {"Owner", "", true}});
-    for (auto& s : *schemas) {
-        content += html::table_row({
-            std::format("<a href=\"/db/{}/schema/{}/tables\">{}</a>",
-                html::escape(db_name), html::escape(s.name), html::escape(s.name)),
-            html::escape(s.owner),
-        });
-    }
-    content += html::table_end();
-
-    auto title = std::format("Schemas - {}", db_name);
-    if (req.is_htmx()) return Response::html(html::partial(std::move(content)));
-    return Response::html(html::page(title, "Dashboard", std::move(content)));
+    auto render = [&](Html& h) {
+        Breadcrumbs::render(std::vector<Crumb>{{"Databases", "/databases"}, {std::string(db_name), ""}}, h);
+        Table::begin(h, {{"Schema", "", true}, {"Owner", "", true}});
+        for (auto& s : *schemas) {
+            auto link = std::format("<a href=\"/db/{}/schema/{}/tables\">{}</a>", escape(db_name), escape(s.name), escape(s.name));
+            Table::row(h, {{link, escape(s.owner)}});
+        }
+        Table::end(h);
+    };
+    if (req.is_htmx()) return Response::html(render_partial(render));
+    return Response::html(render_page(std::format("Schemas - {}", db_name), "Dashboard", render));
 }
 
 auto TableListHandler::handle(Request& req, AppContext& ctx) -> Response {
-    auto db_name = req.param("db");
-    auto schema_name = req.param("schema");
-
+    auto db = req.param("db"); auto sc = req.param("schema");
     auto conn = ctx.pool.checkout();
     if (!conn) return Response::error(error_message(conn.error()));
-
-    auto tables = pg::list_tables(conn->get(), schema_name);
+    auto tables = pg::list_tables(conn->get(), sc);
     if (!tables) return Response::error(error_message(tables.error()));
 
-    std::string content;
-    content += html::breadcrumbs({
-        {"Databases", "/databases"},
-        {std::string(db_name), std::format("/db/{}/schemas", db_name)},
-        {std::string(schema_name), ""},
-    });
-
-    content += "<div class=\"schema-nav\">";
-    content += std::format("<a href=\"/db/{}/schema/{}/tables\" class=\"btn btn-sm btn-primary\">Tables</a>", db_name, schema_name);
-    content += std::format("<a href=\"/db/{}/schema/{}/functions\" class=\"btn btn-sm\">Functions</a>", db_name, schema_name);
-    content += std::format("<a href=\"/db/{}/schema/{}/sequences\" class=\"btn btn-sm\">Sequences</a>", db_name, schema_name);
-    content += std::format("<a href=\"/db/{}/schema/{}/indexes\" class=\"btn btn-sm\">Index Analysis</a>", db_name, schema_name);
-    content += std::format("<a href=\"/db/{}/schema/{}/erd/page\" class=\"btn btn-sm\">ERD</a>", db_name, schema_name);
-    content += "</div>";
-
-    content += html::table_begin({
-        {"Table", "", true}, {"Type", "", true}, {"Rows (est.)", "num", true}, {"Size", "num", true}
-    });
-    for (auto& t : *tables) {
-        auto type_badge = t.type == "table" ? std::string("primary") : std::string("secondary");
-        content += html::table_row({
-            std::format("<a href=\"/db/{}/schema/{}/table/{}\">{}</a>",
-                html::escape(db_name), html::escape(schema_name),
-                html::escape(t.name), html::escape(t.name)),
-            html::badge(t.type, type_badge),
-            std::to_string(t.row_estimate),
-            html::escape(t.size),
-        });
-    }
-    content += html::table_end();
-
-    auto title = std::format("Tables - {}.{}", db_name, schema_name);
-    if (req.is_htmx()) return Response::html(html::partial(std::move(content)));
-    return Response::html(html::page(title, "Dashboard", std::move(content)));
+    auto render = [&](Html& h) {
+        Breadcrumbs::render(std::vector<Crumb>{{"Databases", "/databases"}, {std::string(db), std::format("/db/{}/schemas", db)}, {std::string(sc), ""}}, h);
+        h.raw("<div class=\"schema-nav\">");
+        for (auto [href_sfx, label, primary] : std::initializer_list<std::tuple<const char*, const char*, bool>>{
+            {"tables","Tables",true},{"functions","Functions",false},{"sequences","Sequences",false},
+            {"indexes","Index Analysis",false},{"erd/page","ERD",false}}) {
+            h.raw("<a href=\"/db/").raw(db).raw("/schema/").raw(sc).raw("/").raw(href_sfx)
+             .raw("\" class=\"btn btn-sm").raw(primary ? " btn-primary" : "").raw("\">").raw(label).raw("</a>");
+        }
+        h.raw("</div>");
+        Table::begin(h, {{"Table","",true},{"Type","",true},{"Rows (est.)","num",true},{"Size","num",true}});
+        for (auto& t : *tables) {
+            auto link = std::format("<a href=\"/db/{}/schema/{}/table/{}\">{}</a>", escape(db), escape(sc), escape(t.name), escape(t.name));
+            Table::row(h, {{link, render_to_string<Badge>(Badge::Props{t.type, t.type=="table"?"primary":"secondary"}), std::to_string(t.row_estimate), escape(t.size)}});
+        }
+        Table::end(h);
+    };
+    if (req.is_htmx()) return Response::html(render_partial(render));
+    return Response::html(render_page(std::format("Tables - {}.{}", db, sc), "Dashboard", render));
 }
 
 auto TableDetailHandler::handle(Request& req, AppContext& ctx) -> Response {
-    auto db_name = req.param("db");
-    auto schema_name = req.param("schema");
-    auto table_name = req.param("table");
-
+    auto db = req.param("db"); auto sc = req.param("schema"); auto tb = req.param("table");
     auto conn = ctx.pool.checkout();
     if (!conn) return Response::error(error_message(conn.error()));
 
-    std::string content;
-    content += html::breadcrumbs({
-        {"Databases", "/databases"},
-        {std::string(db_name), std::format("/db/{}/schemas", db_name)},
-        {std::string(schema_name), std::format("/db/{}/schema/{}/tables", db_name, schema_name)},
-        {std::string(table_name), ""},
-    });
+    auto base = std::format("/db/{}/schema/{}/table/{}", db, sc, tb);
 
-    // Section tabs
-    auto browse_url = std::format("/db/{}/schema/{}/table/{}/browse", db_name, schema_name, table_name);
-    auto ddl_url = std::format("/db/{}/schema/{}/table/{}/ddl", db_name, schema_name, table_name);
-    auto stats_url = std::format("/db/{}/schema/{}/table/{}/stats", db_name, schema_name, table_name);
-    auto vacuum_url = std::format("/db/{}/schema/{}/table/{}/vacuum", db_name, schema_name, table_name);
-    auto analyze_url = std::format("/db/{}/schema/{}/table/{}/analyze", db_name, schema_name, table_name);
-    auto truncate_url = std::format("/db/{}/schema/{}/table/{}/truncate", db_name, schema_name, table_name);
+    auto render = [&](Html& h) {
+        Breadcrumbs::render(std::vector<Crumb>{{"Databases","/databases"},{std::string(db),std::format("/db/{}/schemas",db)},
+            {std::string(sc),std::format("/db/{}/schema/{}/tables",db,sc)},{std::string(tb),""}}, h);
 
-    auto tab_btn = [](std::string_view url) {
-        return std::format(
-            " hx-get=\"{}\" hx-target=\"#tab-content\" hx-swap=\"innerHTML\" hx-trigger=\"click\""
-            " hx-on::before-request=\"this.parentElement.querySelectorAll('.active').forEach(function(e){{e.classList.remove('active')}}); this.classList.add('active')\"", url);
+        // Tabs + actions
+        h.raw("<div style=\"display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--sp-3)\">");
+        SectionTabs::render({{{"Columns","",true},{"Data",base+"/browse"},{"DDL",base+"/ddl"},{"Statistics",base+"/stats"}}}, "tab-content", h);
+        h.raw("<div class=\"btn-group\">");
+        h.raw("<button class=\"btn btn-sm\" hx-post=\"").raw(base).raw("/vacuum\" hx-target=\"#action-result\" hx-swap=\"innerHTML\">Vacuum</button>");
+        h.raw("<button class=\"btn btn-sm\" hx-post=\"").raw(base).raw("/analyze\" hx-target=\"#action-result\" hx-swap=\"innerHTML\">Analyze</button>");
+        h.raw("<button class=\"btn btn-sm btn-danger\" hx-post=\"").raw(base).raw("/truncate\" hx-target=\"#action-result\" hx-swap=\"innerHTML\" hx-confirm=\"TRUNCATE ").text(sc).raw(".").text(tb).raw("?\">Truncate</button>");
+        h.raw("</div></div><div id=\"action-result\"></div><div id=\"tab-content\">");
+
+        // Columns
+        auto cols = pg::describe_columns(conn->get(), sc, tb);
+        if (cols) {
+            Table::begin(h, {{"#","num"},{"Name",""},{"Type",""},{"Nullable",""},{"Default",""},{"PK",""}});
+            for (auto& c : *cols) {
+                Table::row(h, {{std::to_string(c.ordinal), std::format("<code>{}</code>",escape(c.name)),
+                    render_to_string<Badge>(Badge::Props{c.type,"secondary"}), c.nullable?std::string("YES"):std::string("<strong>NO</strong>"),
+                    c.default_value.empty()?std::string("&mdash;"):std::format("<code>{}</code>",escape(c.default_value)),
+                    c.is_primary_key?render_to_string<Badge>(Badge::Props{"PK","primary"}):std::string("")}});
+            }
+            Table::end(h);
+        }
+
+        // Indexes
+        auto idxs = pg::list_indexes(conn->get(), sc, tb);
+        if (idxs && !idxs->empty()) {
+            h.raw("<h3>Indexes</h3>");
+            Table::begin(h, {{"Name",""},{"Definition",""},{"Unique",""},{"Primary",""},{"Size","num"}});
+            for (auto& i : *idxs) {
+                Table::row(h, {{escape(i.name),std::format("<code>{}</code>",escape(i.definition)),
+                    std::string(i.is_unique?"&#10003;":""),std::string(i.is_primary?"&#10003;":""),escape(i.size)}});
+            }
+            Table::end(h);
+        }
+
+        // Constraints
+        auto cons = pg::list_constraints(conn->get(), sc, tb);
+        if (cons && !cons->empty()) {
+            h.raw("<h3>Constraints</h3>");
+            Table::begin(h, {{"Name",""},{"Type",""},{"Definition",""}});
+            for (auto& c : *cons) {
+                Table::row(h, {{escape(c.name),render_to_string<Badge>(Badge::Props{c.type,"secondary"}),std::format("<code>{}</code>",escape(c.definition))}});
+            }
+            Table::end(h);
+        }
+        h.raw("</div>");
     };
-
-    content += "<div style=\"display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--sp-3)\">";
-    content += "<div class=\"section-tabs\" style=\"margin-bottom:0\">";
-    content += "<button class=\"section-tab active\">Columns</button>";
-    content += std::format("<button class=\"section-tab\"{}>Data</button>", tab_btn(browse_url));
-    content += std::format("<button class=\"section-tab\"{}>DDL</button>", tab_btn(ddl_url));
-    content += std::format("<button class=\"section-tab\"{}>Statistics</button>", tab_btn(stats_url));
-    content += "</div>";
-    content += "<div class=\"btn-group\">";
-    content += std::format("<button class=\"btn btn-sm\" hx-post=\"{}\" hx-target=\"#action-result\" hx-swap=\"innerHTML\">Vacuum</button>", vacuum_url);
-    content += std::format("<button class=\"btn btn-sm\" hx-post=\"{}\" hx-target=\"#action-result\" hx-swap=\"innerHTML\">Analyze</button>", analyze_url);
-    content += std::format("<button class=\"btn btn-sm btn-danger\" hx-post=\"{}\" hx-target=\"#action-result\" hx-swap=\"innerHTML\" hx-confirm=\"TRUNCATE all data from {}.{}?\">Truncate</button>", truncate_url, schema_name, table_name);
-    content += "</div>";
-    content += "</div>";
-    content += "<div id=\"action-result\"></div>";
-    content += "<div id=\"tab-content\">";
-
-    // Columns
-    auto cols = pg::describe_columns(conn->get(), schema_name, table_name);
-    if (cols) {
-        content += html::table_begin({
-            {"#", "num"}, {"Name", ""}, {"Type", ""}, {"Nullable", ""},
-            {"Default", ""}, {"PK", ""}
-        });
-        for (auto& c : *cols) {
-            auto nullable_str = c.nullable ? std::string("YES") : std::string("<strong>NO</strong>");
-            auto default_str = c.default_value.empty()
-                ? std::string("&mdash;")
-                : std::format("<code>{}</code>", html::escape(c.default_value));
-            auto pk_str = c.is_primary_key ? html::badge("PK", "primary") : std::string("");
-
-            content += html::table_row({
-                std::to_string(c.ordinal),
-                std::format("<code>{}</code>", html::escape(c.name)),
-                html::badge(c.type, "secondary"),
-                nullable_str,
-                default_str,
-                pk_str,
-            });
-        }
-        content += html::table_end();
-    }
-
-    // Indexes
-    auto idxs = pg::list_indexes(conn->get(), schema_name, table_name);
-    if (idxs && !idxs->empty()) {
-        content += "<h3>Indexes</h3>";
-        content += html::table_begin({
-            {"Name", ""}, {"Definition", ""}, {"Unique", ""}, {"Primary", ""}, {"Size", "num"}
-        });
-        for (auto& idx : *idxs) {
-            content += html::table_row({
-                html::escape(idx.name),
-                std::format("<code>{}</code>", html::escape(idx.definition)),
-                std::string(idx.is_unique ? "&#10003;" : ""),
-                std::string(idx.is_primary ? "&#10003;" : ""),
-                html::escape(idx.size),
-            });
-        }
-        content += html::table_end();
-    }
-
-    // Constraints
-    auto cons = pg::list_constraints(conn->get(), schema_name, table_name);
-    if (cons && !cons->empty()) {
-        content += "<h3>Constraints</h3>";
-        content += html::table_begin({{"Name", ""}, {"Type", ""}, {"Definition", ""}});
-        for (auto& c : *cons) {
-            content += html::table_row({
-                html::escape(c.name),
-                html::badge(c.type, "secondary"),
-                std::format("<code>{}</code>", html::escape(c.definition)),
-            });
-        }
-        content += html::table_end();
-    }
-
-    content += "</div>";
-
-    auto title = std::format("{}.{}", schema_name, table_name);
-    if (req.is_htmx()) return Response::html(html::partial(std::move(content)));
-    return Response::html(html::page(title, "Dashboard", std::move(content)));
+    if (req.is_htmx()) return Response::html(render_partial(render));
+    return Response::html(render_page(std::format("{}.{}",sc,tb), "Dashboard", render));
 }
 
 auto TableDataHandler::handle(Request& req, AppContext& ctx) -> Response {
-    auto schema_name = req.param("schema");
-    auto table_name = req.param("table");
-
-    auto limit_str = req.query("limit");
+    auto sc = req.param("schema"); auto tb = req.param("table");
     int limit = 100;
-    if (!limit_str.empty()) {
-        try { limit = std::stoi(std::string(limit_str)); }
-        catch (...) {}
-        if (limit > 1000) limit = 1000;
-    }
-
+    if (auto ls = req.query("limit"); !ls.empty()) { try { limit = std::stoi(std::string(ls)); } catch(...){} }
+    if (limit > 1000) limit = 1000;
     auto conn = ctx.pool.checkout();
     if (!conn) return Response::error(error_message(conn.error()));
-
-    auto result = pg::preview_rows(conn->get(), schema_name, table_name, limit);
+    auto result = pg::preview_rows(conn->get(), sc, tb, limit);
     if (!result) return Response::error(error_message(result.error()));
 
-    std::string content;
-
-    content += std::format("<div class=\"query-info\"><span class=\"rows-badge\">{} rows</span> <span class=\"time-badge\">limit {}</span></div>",
-                           result->row_count(), limit);
-
-    std::vector<html::TableColumn> headers;
-    for (int c = 0; c < result->col_count(); ++c) {
-        headers.push_back({std::string(result->column_name(c)), "", true});
-    }
-    content += html::table_begin(headers);
-
+    auto h = Html::with_capacity(16384);
+    h.raw("<div class=\"query-info\"><span class=\"rows-badge\">").raw(std::to_string(result->row_count()))
+     .raw(" rows</span> <span class=\"time-badge\">limit ").raw(std::to_string(limit)).raw("</span></div>");
+    std::vector<Col> cols;
+    for (int c = 0; c < result->col_count(); ++c) cols.push_back({result->column_name(c),"",true});
+    Table::begin(h, cols);
     for (auto row : *result) {
         std::vector<std::string> cells;
         for (int c = 0; c < row.col_count(); ++c) {
-            if (row.is_null(c)) {
-                cells.push_back("<span class=\"null-value\">NULL</span>");
-            } else {
-                auto val = row[c];
-                if (val.size() > 200) {
-                    cells.push_back(html::escape(val.substr(0, 200)) + "...");
-                } else {
-                    cells.push_back(html::escape(val));
-                }
-            }
+            if (row.is_null(c)) cells.emplace_back("<span class=\"null-value\">NULL</span>");
+            else { auto v = row[c]; cells.push_back(v.size()>200 ? escape(v.substr(0,200))+"..." : escape(v)); }
         }
-        content += html::table_row(cells);
+        Table::row(h, cells);
     }
-    content += html::table_end();
-
-    return Response::html(html::partial(std::move(content)));
+    Table::end(h);
+    return Response::html(std::move(h).finish());
 }
-
-// ─── TableDDLHandler ────────────────────────────────────────────────
 
 auto TableDDLHandler::handle(Request& req, AppContext& ctx) -> Response {
-    auto schema_name = req.param("schema");
-    auto table_name = req.param("table");
-
+    auto sc = req.param("schema"); auto tb = req.param("table");
     auto conn = ctx.pool.checkout();
     if (!conn) return Response::error(error_message(conn.error()));
-
-    auto ddl = pg::table_ddl(conn->get(), schema_name, table_name);
-    if (!ddl) return Response::html(html::alert(error_message(ddl.error()), "error"));
-
-    std::string content;
-    content += "<div class=\"ddl-toolbar\">";
-    content += "<button class=\"btn btn-sm\" onclick=\"navigator.clipboard.writeText(document.querySelector('.ddl-source').textContent).then(()=>this.textContent='Copied!')\">";
-    content += "Copy to Clipboard</button></div>";
-    content += std::format("<pre class=\"function-source ddl-source\">{}</pre>", html::escape(*ddl));
-    return Response::html(html::partial(std::move(content)));
+    auto ddl = pg::table_ddl(conn->get(), sc, tb);
+    if (!ddl) return Response::html(render_to_string<Alert>(Alert::Props{error_message(ddl.error()), "error"}));
+    auto h = Html::with_capacity(ddl->size() + 256);
+    h.raw("<div class=\"ddl-toolbar\"><button class=\"btn btn-sm\" onclick=\"navigator.clipboard.writeText(document.querySelector('.ddl-source').textContent).then(()=>this.textContent='Copied!')\">Copy to Clipboard</button></div>");
+    h.raw("<pre class=\"function-source ddl-source\">").text(*ddl).raw("</pre>");
+    return Response::html(std::move(h).finish());
 }
-
-// ─── ColumnStatsHandler ─────────────────────────────────────────────
 
 auto ColumnStatsHandler::handle(Request& req, AppContext& ctx) -> Response {
-    auto schema_name = req.param("schema");
-    auto table_name = req.param("table");
-
+    auto sc = req.param("schema"); auto tb = req.param("table");
     auto conn = ctx.pool.checkout();
     if (!conn) return Response::error(error_message(conn.error()));
+    auto stats = pg::column_statistics(conn->get(), sc, tb);
+    if (!stats) return Response::html(render_to_string<Alert>(Alert::Props{error_message(stats.error()), "error"}));
+    if (stats->empty()) return Response::html(render_to_string<Alert>(Alert::Props{"No statistics. Run ANALYZE first.", "warning"}));
 
-    auto stats = pg::column_statistics(conn->get(), schema_name, table_name);
-    if (!stats) return Response::html(html::alert(error_message(stats.error()), "error"));
-
-    if (stats->empty()) {
-        return Response::html(html::alert("No statistics available. Run ANALYZE on this table first.", "warning"));
-    }
-
-    std::string content;
+    auto h = Html::with_capacity(8192);
     for (auto& s : *stats) {
-        content += std::format("<div class=\"col-stat-card\">");
-        content += std::format("<div class=\"col-stat-header\">");
-        content += std::format("<strong>{}</strong> <span class=\"badge badge-secondary\">{}</span>", html::escape(s.column_name), html::escape(s.data_type));
-        content += "</div>";
-        content += "<div class=\"col-stat-body\">";
-
-        // Null fraction bar
         auto null_pct = s.null_fraction * 100;
-        content += std::format("<div class=\"col-stat-row\"><span class=\"col-stat-label\">Null %</span>"
-            "<div class=\"col-stat-bar-track\"><div class=\"col-stat-bar\" style=\"width:{:.1f}%\"></div></div>"
-            "<span class=\"col-stat-value\">{:.1f}%</span></div>", null_pct, null_pct);
-
-        // Distinct values
-        auto distinct_str = s.n_distinct < 0
-            ? std::format("{:.0f}% unique", static_cast<double>(-s.n_distinct) * 100.0)
-            : std::to_string(s.n_distinct) + " distinct";
-        content += std::format("<div class=\"col-stat-row\"><span class=\"col-stat-label\">Distinct</span>"
-            "<span class=\"col-stat-value\">{}</span></div>", distinct_str);
-
-        // Avg width
-        content += std::format("<div class=\"col-stat-row\"><span class=\"col-stat-label\">Avg Width</span>"
-            "<span class=\"col-stat-value\">{} bytes</span></div>", s.avg_width);
-
-        // Correlation
-        content += std::format("<div class=\"col-stat-row\"><span class=\"col-stat-label\">Correlation</span>"
-            "<span class=\"col-stat-value\">{:.4f}</span></div>", s.correlation);
-
-        // Most common values
+        auto distinct = s.n_distinct < 0 ? std::format("{:.0f}% unique", static_cast<double>(-s.n_distinct)*100.0)
+                                          : std::to_string(s.n_distinct) + " distinct";
+        h.raw("<div class=\"col-stat-card\"><div class=\"col-stat-header\"><strong>").text(s.column_name)
+         .raw("</strong> ").raw(render_to_string<Badge>(Badge::Props{s.data_type,"secondary"}))
+         .raw("</div><div class=\"col-stat-body\">");
+        h.raw("<div class=\"col-stat-row\"><span class=\"col-stat-label\">Null %</span>"
+              "<div class=\"col-stat-bar-track\"><div class=\"col-stat-bar\" style=\"width:")
+         .raw(std::format("{:.1f}", null_pct)).raw("%\"></div></div><span class=\"col-stat-value\">")
+         .raw(std::format("{:.1f}%", null_pct)).raw("</span></div>");
+        h.raw("<div class=\"col-stat-row\"><span class=\"col-stat-label\">Distinct</span><span class=\"col-stat-value\">").raw(distinct).raw("</span></div>");
+        h.raw("<div class=\"col-stat-row\"><span class=\"col-stat-label\">Avg Width</span><span class=\"col-stat-value\">").raw(std::to_string(s.avg_width)).raw(" bytes</span></div>");
+        h.raw("<div class=\"col-stat-row\"><span class=\"col-stat-label\">Correlation</span><span class=\"col-stat-value\">").raw(std::format("{:.4f}", s.correlation)).raw("</span></div>");
         if (!s.most_common_vals.empty()) {
-            auto vals = s.most_common_vals.size() > 200
-                ? s.most_common_vals.substr(0, 200) + "..."
-                : s.most_common_vals;
-            content += std::format("<div class=\"col-stat-row\"><span class=\"col-stat-label\">Top Values</span>"
-                "<code class=\"col-stat-vals\">{}</code></div>", html::escape(vals));
+            auto v = s.most_common_vals.size()>200 ? s.most_common_vals.substr(0,200)+"..." : s.most_common_vals;
+            h.raw("<div class=\"col-stat-row\"><span class=\"col-stat-label\">Top Values</span><code class=\"col-stat-vals\">").text(v).raw("</code></div>");
         }
-
-        content += "</div></div>";
+        h.raw("</div></div>");
     }
-
-    return Response::html(html::partial(std::move(content)));
+    return Response::html(std::move(h).finish());
 }
-
-// ─── VacuumHandler ──────────────────────────────────────────────────
 
 auto VacuumHandler::handle(Request& req, AppContext& ctx) -> Response {
-    auto schema_name = req.param("schema");
-    auto table_name = req.param("table");
-
+    auto sc = req.param("schema"); auto tb = req.param("table");
     auto conn = ctx.pool.checkout();
     if (!conn) return Response::error(error_message(conn.error()));
-
-    auto result = pg::vacuum_table(conn->get(), schema_name, table_name);
-    if (!result) return Response::html(html::alert(error_message(result.error()), "error"));
-
-    return Response::html(html::alert(std::format("VACUUM completed on {}.{}", schema_name, table_name), "info"));
+    auto r = pg::vacuum_table(conn->get(), sc, tb);
+    if (!r) return Response::html(render_to_string<Alert>(Alert::Props{error_message(r.error()), "error"}));
+    return Response::html(render_to_string<Alert>(Alert::Props{std::format("VACUUM completed on {}.{}", sc, tb), "info"}));
 }
-
-// ─── AnalyzeHandler ─────────────────────────────────────────────────
 
 auto AnalyzeHandler::handle(Request& req, AppContext& ctx) -> Response {
-    auto schema_name = req.param("schema");
-    auto table_name = req.param("table");
-
+    auto sc = req.param("schema"); auto tb = req.param("table");
     auto conn = ctx.pool.checkout();
     if (!conn) return Response::error(error_message(conn.error()));
-
-    auto result = pg::analyze_table(conn->get(), schema_name, table_name);
-    if (!result) return Response::html(html::alert(error_message(result.error()), "error"));
-
-    return Response::html(html::alert(std::format("ANALYZE completed on {}.{}", schema_name, table_name), "info"));
+    auto r = pg::analyze_table(conn->get(), sc, tb);
+    if (!r) return Response::html(render_to_string<Alert>(Alert::Props{error_message(r.error()), "error"}));
+    return Response::html(render_to_string<Alert>(Alert::Props{std::format("ANALYZE completed on {}.{}", sc, tb), "info"}));
 }
 
-// ─── ERDDataHandler ─────────────────────────────────────────────────
-
 static auto json_esc(std::string_view s) -> std::string {
-    std::string out;
-    out.reserve(s.size() + 4);
-    for (char c : s) {
-        if (c == '"') out += "\\\"";
-        else if (c == '\\') out += "\\\\";
-        else if (c == '\n') out += "\\n";
-        else out += c;
-    }
+    std::string out; out.reserve(s.size()+4);
+    for (char c : s) { if (c=='"') out+="\\\""; else if (c=='\\') out+="\\\\"; else if (c=='\n') out+="\\n"; else out+=c; }
     return out;
 }
 
 auto ERDDataHandler::handle(Request& req, AppContext& ctx) -> Response {
-    auto schema_name = req.param("schema");
-
+    auto sc = req.param("schema");
     auto conn = ctx.pool.checkout();
     if (!conn) return Response::json("{\"tables\":[],\"relationships\":[]}", 500);
-
-    auto erd = pg::schema_erd(conn->get(), schema_name);
+    auto erd = pg::schema_erd(conn->get(), sc);
     if (!erd) return Response::json("{\"tables\":[],\"relationships\":[]}", 500);
 
-    std::string json = "{\"tables\":[";
+    auto h = Html::with_capacity(16384);
+    h.raw("{\"tables\":[");
     for (std::size_t i = 0; i < erd->tables.size(); ++i) {
-        if (i > 0) json += ',';
+        if (i) h.raw(',');
         auto& t = erd->tables[i];
-        json += "{\"name\":\"" + json_esc(t.name) + "\",\"type\":\"" + json_esc(t.type) + "\",\"columns\":[";
+        h.raw("{\"name\":\"").raw(json_esc(t.name)).raw("\",\"type\":\"").raw(json_esc(t.type)).raw("\",\"columns\":[");
         for (std::size_t j = 0; j < t.columns.size(); ++j) {
-            if (j > 0) json += ',';
-            json += "{\"name\":\"" + json_esc(t.columns[j].first) + "\",\"type\":\"" + json_esc(t.columns[j].second) + "\"}";
+            if (j) h.raw(',');
+            h.raw("{\"name\":\"").raw(json_esc(t.columns[j].first)).raw("\",\"type\":\"").raw(json_esc(t.columns[j].second)).raw("\"}");
         }
-        json += "]}";
+        h.raw("]}");
     }
-    json += "],\"relationships\":[";
+    h.raw("],\"relationships\":[");
     for (std::size_t i = 0; i < erd->relationships.size(); ++i) {
-        if (i > 0) json += ',';
+        if (i) h.raw(',');
         auto& r = erd->relationships[i];
-        json += "{\"name\":\"" + json_esc(r.constraint_name) + "\","
-                "\"source\":\"" + json_esc(r.source_table) + "\","
-                "\"sourceCol\":\"" + json_esc(r.source_columns) + "\","
-                "\"target\":\"" + json_esc(r.target_table) + "\","
-                "\"targetCol\":\"" + json_esc(r.target_columns) + "\"}";
+        h.raw("{\"name\":\"").raw(json_esc(r.constraint_name)).raw("\",\"source\":\"").raw(json_esc(r.source_table))
+         .raw("\",\"sourceCol\":\"").raw(json_esc(r.source_columns)).raw("\",\"target\":\"").raw(json_esc(r.target_table))
+         .raw("\",\"targetCol\":\"").raw(json_esc(r.target_columns)).raw("\"}");
     }
-    json += "]}";
-    return Response::json(std::move(json));
+    h.raw("]}");
+    return Response::json(std::move(h).finish());
 }
 
-// ─── ERDPageHandler ─────────────────────────────────────────────────
-
 auto ERDPageHandler::handle(Request& req, AppContext& /*ctx*/) -> Response {
-    auto db_name = req.param("db");
-    auto schema_name = req.param("schema");
-
-    std::string content;
-    content += html::breadcrumbs({
-        {"Databases", "/databases"},
-        {std::string(db_name), std::format("/db/{}/schemas", db_name)},
-        {std::string(schema_name), std::format("/db/{}/schema/{}/tables", db_name, schema_name)},
-        {"ERD", ""},
-    });
-
-    content += std::format(
-        "<div id=\"erd-container\" class=\"erd-container\" data-url=\"/db/{}/schema/{}/erd\">"
-        "<div class=\"loading\">Loading ERD...</div>"
-        "</div>",
-        db_name, schema_name
-    );
-
-    auto title = std::format("ERD - {}.{}", db_name, schema_name);
-    if (req.is_htmx()) return Response::html(html::partial(std::move(content)));
-    return Response::html(html::page(title, "Dashboard", std::move(content)));
+    auto db = req.param("db"); auto sc = req.param("schema");
+    auto render = [&](Html& h) {
+        Breadcrumbs::render(std::vector<Crumb>{{"Databases","/databases"},{std::string(db),std::format("/db/{}/schemas",db)},
+            {std::string(sc),std::format("/db/{}/schema/{}/tables",db,sc)},{"ERD",""}}, h);
+        h.raw("<div id=\"erd-container\" class=\"erd-container\" data-url=\"/db/").raw(db).raw("/schema/").raw(sc)
+         .raw("/erd\"><div class=\"loading\">Loading ERD...</div></div>");
+    };
+    if (req.is_htmx()) return Response::html(render_partial(render));
+    return Response::html(render_page(std::format("ERD - {}.{}", db, sc), "Dashboard", render));
 }
 
 // ─── TableBrowseHandler — fast paginated editable data grid ─────────
@@ -627,7 +451,7 @@ auto TableBrowseHandler::handle(Request& req, AppContext& ctx) -> Response {
     int offset = (page - 1) * limit;
 
     auto conn = ctx.pool.checkout();
-    if (!conn) return Response::html(html::alert(error_message(conn.error()), "error"));
+    if (!conn) return Response::html(render_to_string<Alert>(Alert::Props{error_message(conn.error()), "error"}));
 
     // Count total rows (use estimate for speed on large tables)
     auto count_res = conn->get().exec(std::format(
@@ -649,12 +473,12 @@ auto TableBrowseHandler::handle(Request& req, AppContext& ctx) -> Response {
 
     auto result = conn->get().exec(data_sql);
     if (!result) return Response::html(
-        std::format("<div class=\"query-error\">{}</div>", html::escape(error_message(result.error())))
+        std::format("<div class=\"query-error\">{}</div>", escape(error_message(result.error())))
     );
 
     auto base_url = std::format("/db/{}/schema/{}/table/{}/browse", db_name, schema_name, table_name);
     auto meta = std::format("data-schema=\"{}\" data-table=\"{}\" data-db=\"{}\"",
-        html::escape(schema_name), html::escape(table_name), html::escape(db_name));
+        escape(schema_name), escape(table_name), escape(db_name));
 
     std::string content;
 
@@ -689,7 +513,7 @@ auto TableBrowseHandler::handle(Request& req, AppContext& ctx) -> Response {
         content += std::format(
             "<div class=\"insert-field\"><label>{}</label>"
             "<input type=\"text\" name=\"col_{}\" placeholder=\"{}\" class=\"insert-input\"></div>",
-            html::escape(col_name), c - 1, html::escape(col_name));
+            escape(col_name), c - 1, escape(col_name));
     }
     content += "</div><div class=\"insert-actions\">";
     content += "<button type=\"submit\" class=\"btn btn-sm btn-primary\">Insert</button>";
@@ -700,7 +524,7 @@ auto TableBrowseHandler::handle(Request& req, AppContext& ctx) -> Response {
     content += "<div class=\"table-wrapper scrollable\" id=\"data-grid-wrap\"><table id=\"data-grid\">";
     content += "<thead><tr><th class=\"row-num-header\">#</th>";
     for (int c = 1; c < result->col_count(); ++c) {
-        content += std::format("<th class=\"sortable\">{}</th>", html::escape(result->column_name(c)));
+        content += std::format("<th class=\"sortable\">{}</th>", escape(result->column_name(c)));
     }
     content += "<th></th></tr></thead><tbody>";
 
@@ -708,26 +532,26 @@ auto TableBrowseHandler::handle(Request& req, AppContext& ctx) -> Response {
         auto ctid = std::string(row[0]); // ctid is column 0
         auto row_num = offset + row.index() + 1;
 
-        content += std::format("<tr data-ctid=\"{}\" {}>", html::escape(ctid), meta);
+        content += std::format("<tr data-ctid=\"{}\" {}>", escape(ctid), meta);
         content += std::format("<td class=\"row-num\">{}</td>", row_num);
 
         for (int c = 1; c < row.col_count(); ++c) {
             auto col_name = result->column_name(c);
             if (row.is_null(c)) {
-                content += std::format("<td><span class=\"null-value editable-cell\" data-col=\"{}\" data-ctid=\"{}\">NULL</span></td>", html::escape(col_name), html::escape(ctid));
+                content += std::format("<td><span class=\"null-value editable-cell\" data-col=\"{}\" data-ctid=\"{}\">NULL</span></td>", escape(col_name), escape(ctid));
             } else {
                 auto val = std::string(row[c]);
                 // Short values: show inline. Long values: truncate with expand button
                 if (val.size() <= 80) {
                     content += std::format("<td><span class=\"editable-cell\" data-col=\"{}\" data-ctid=\"{}\">{}</span></td>",
-                        html::escape(col_name), html::escape(ctid), html::escape(val));
+                        escape(col_name), escape(ctid), escape(val));
                 } else {
-                    auto preview = html::escape(val.substr(0, 60));
+                    auto preview = escape(val.substr(0, 60));
                     content += std::format(
                         "<td><span class=\"editable-cell cell-long\" data-col=\"{}\" data-ctid=\"{}\" "
                         "data-full=\"{}\">{}&hellip;</span></td>",
-                        html::escape(col_name), html::escape(ctid),
-                        html::escape(val), preview);
+                        escape(col_name), escape(ctid),
+                        escape(val), preview);
                 }
             }
         }
@@ -745,7 +569,7 @@ auto TableBrowseHandler::handle(Request& req, AppContext& ctx) -> Response {
     }
     content += "</tbody></table></div>";
 
-    return Response::html(html::partial(std::move(content)));
+    return Response::html(std::move(content));
 }
 
 // ─── CellUpdateHandler ──────────────────────────────────────────────
@@ -788,11 +612,11 @@ auto RowDeleteHandler::handle(Request& req, AppContext& ctx) -> Response {
     if (ctid.empty()) return Response::error("No row identified", 400);
 
     auto conn = ctx.pool.checkout();
-    if (!conn) return Response::html(html::alert(error_message(conn.error()), "error"));
+    if (!conn) return Response::html(render_to_string<Alert>(Alert::Props{error_message(conn.error()), "error"}));
 
     auto sql = std::format("DELETE FROM \"{}\".\"{}\" WHERE ctid = '{}'", schema_name, table_name, ctid);
     auto result = conn->get().exec(sql);
-    if (!result) return Response::html(html::alert(error_message(result.error()), "error"));
+    if (!result) return Response::html(render_to_string<Alert>(Alert::Props{error_message(result.error()), "error"}));
 
     auto browse_url = std::format("/db/{}/schema/{}/table/{}/browse", db_name, schema_name, table_name);
     return Response::html(std::format("<div hx-get=\"{}\" hx-trigger=\"load\" hx-target=\"#tab-content\" hx-swap=\"innerHTML\">"
@@ -808,11 +632,11 @@ auto RowInsertHandler::handle(Request& req, AppContext& ctx) -> Response {
     auto body = std::string(req.body());
 
     auto conn = ctx.pool.checkout();
-    if (!conn) return Response::html(html::alert(error_message(conn.error()), "error"));
+    if (!conn) return Response::html(render_to_string<Alert>(Alert::Props{error_message(conn.error()), "error"}));
 
     // Get column names
     auto cols_res = pg::describe_columns(conn->get(), schema_name, table_name);
-    if (!cols_res) return Response::html(html::alert(error_message(cols_res.error()), "error"));
+    if (!cols_res) return Response::html(render_to_string<Alert>(Alert::Props{error_message(cols_res.error()), "error"}));
 
     std::string col_names, values;
     int col_idx = 0;
@@ -829,12 +653,12 @@ auto RowInsertHandler::handle(Request& req, AppContext& ctx) -> Response {
         col_idx++;
     }
 
-    if (col_names.empty()) return Response::html(html::alert("No values provided", "warning"));
+    if (col_names.empty()) return Response::html(render_to_string<Alert>(Alert::Props{"No values provided", "warning"}));
 
     auto sql = std::format("INSERT INTO \"{}\".\"{}\" ({}) VALUES ({})", schema_name, table_name, col_names, values);
     auto result = conn->get().exec(sql);
     if (!result) return Response::html(
-        std::format("<div class=\"query-error\">{}</div>", html::escape(error_message(result.error())))
+        std::format("<div class=\"query-error\">{}</div>", escape(error_message(result.error())))
     );
 
     auto browse_url = std::format("/db/{}/schema/{}/table/{}/browse", db_name, schema_name, table_name);
@@ -849,13 +673,13 @@ auto TruncateTableHandler::handle(Request& req, AppContext& ctx) -> Response {
     auto table_name = req.param("table");
 
     auto conn = ctx.pool.checkout();
-    if (!conn) return Response::html(html::alert(error_message(conn.error()), "error"));
+    if (!conn) return Response::html(render_to_string<Alert>(Alert::Props{error_message(conn.error()), "error"}));
 
     auto sql = std::format("TRUNCATE TABLE \"{}\".\"{}\"", schema_name, table_name);
     auto result = conn->get().exec(sql);
-    if (!result) return Response::html(html::alert(error_message(result.error()), "error"));
+    if (!result) return Response::html(render_to_string<Alert>(Alert::Props{error_message(result.error()), "error"}));
 
-    return Response::html(html::alert(std::format("Table {}.{} truncated", schema_name, table_name), "info"));
+    return Response::html(render_to_string<Alert>(Alert::Props{std::format("Table {}.{} truncated", schema_name, table_name), "info"}));
 }
 
 // ─── TableExportHandler (CSV) ───────────────────────────────────────
