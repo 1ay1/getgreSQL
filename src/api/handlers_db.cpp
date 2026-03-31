@@ -117,14 +117,13 @@ auto DashboardContentHandler::handle(Request& /*req*/, AppContext& ctx) -> Respo
         { auto _ = scope(h, "div", "class=\"dashboard-section\"");
             h.raw("<div class=\"dashboard-section-header\">Databases</div>");
             { auto _ = scope(h, "div", "class=\"dashboard-section-body\"");
-                h.raw("<table><thead><tr><th>Name</th><th>Size</th><th>Conn</th><th>Cache</th></tr></thead><tbody>");
+                h.raw("<table><thead><tr><th>Name</th><th style=\"text-align:right\">Size</th><th style=\"width:100px\"></th><th>Conn</th><th>Cache</th></tr></thead><tbody>");
                 for (auto& d : *dbs_res) {
                     auto pct = static_cast<double>(d.size_bytes) / max_size * 100;
                     auto cv = d.cache_hit_ratio < 0.90 ? "danger" : d.cache_hit_ratio < 0.99 ? "warning" : "success";
                     h.raw("<tr><td><a href=\"/db/").text(d.name).raw("/schemas\"><strong>").text(d.name).raw("</strong></a></td>");
-                    h.raw("<td class=\"num\"><div style=\"display:flex;align-items:center;gap:8px;justify-content:flex-end\">");
-                    h.text(d.size); SizeBar::render({pct}, h);
-                    h.raw("</div></td>");
+                    h.raw("<td class=\"num\" style=\"white-space:nowrap\">").text(d.size).raw("</td>");
+                    h.raw("<td>"); SizeBar::render({pct}, h); h.raw("</td>");
                     h.raw("<td class=\"num\">").raw(std::to_string(d.connections)).raw("</td>");
                     h.raw("<td>"); Badge::render({std::format("{:.0f}%", d.cache_hit_ratio * 100), cv}, h); h.raw("</td></tr>");
                 }
