@@ -24,8 +24,11 @@ struct StaticHandler {
 // every handler satisfies the HandlerType concept.
 
 using AppRoutes = RouteTable<
-    // Dashboard
+    // Dashboard (shell-first: parallel section loading)
     Route<GET, "/",                                              IndexHandler>,
+    Route<GET, "/dashboard/health",                              DashboardHealthHandler>,
+    Route<GET, "/dashboard/stats",                               DashboardStatsHandler>,
+    Route<GET, "/dashboard/content",                             DashboardContentHandler>,
 
     // Database browsing
     Route<GET, "/databases",                                     DatabaseListHandler>,

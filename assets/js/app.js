@@ -108,6 +108,39 @@ document.addEventListener('htmx:afterSettle', function() {
     treeHighlightCurrent();
 });
 
+// ─── Section Tab Clicks ──────────────────────────────────────────────────
+// Handles data-tab-url tabs via fetch — more reliable than hx-* attributes
+// which can break after SPA navigation swaps the DOM.
+
+document.addEventListener('click', function(e) {
+    var tab = e.target.closest('.section-tab[data-tab-url]');
+    if (!tab) return;
+
+    var url = tab.getAttribute('data-tab-url');
+    var tabsContainer = tab.closest('.section-tabs');
+    var targetId = tabsContainer ? tabsContainer.getAttribute('data-target') : null;
+    var target = targetId ? document.getElementById(targetId) : null;
+    if (!url || !target) return;
+
+    // Update active state
+    tabsContainer.querySelectorAll('.section-tab').forEach(function(t) {
+        t.classList.remove('active');
+    });
+    tab.classList.add('active');
+
+    // Fetch and swap
+    target.innerHTML = '<div class="loading">Loading...</div>';
+    fetch(url, { headers: { 'HX-Request': 'true' } })
+        .then(function(r) { return r.text(); })
+        .then(function(html) {
+            target.innerHTML = html;
+            if (window.htmx) htmx.process(target);
+        })
+        .catch(function(err) {
+            target.innerHTML = '<div class="alert alert-error">' + err.message + '</div>';
+        });
+});
+
 // ─── Sidebar Resize ──────────────────────────────────────────────────────
 
 (function() {

@@ -10,6 +10,17 @@ struct IndexHandler {
     static auto handle(Request& req, AppContext& ctx) -> Response;
 };
 
+// Shell-first dashboard sections (loaded in parallel by htmx)
+struct DashboardHealthHandler {
+    static auto handle(Request& req, AppContext& ctx) -> Response;
+};
+struct DashboardStatsHandler {
+    static auto handle(Request& req, AppContext& ctx) -> Response;
+};
+struct DashboardContentHandler {
+    static auto handle(Request& req, AppContext& ctx) -> Response;
+};
+
 struct DatabaseListHandler {
     static auto handle(Request& req, AppContext& ctx) -> Response;
 };
