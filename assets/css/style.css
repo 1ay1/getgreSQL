@@ -764,9 +764,30 @@ td {
     vertical-align: middle;
     line-height: 1.35;
     font-size: var(--font-size-sm);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 250px;
 }
 
-td.wide { max-width: 400px; word-break: break-word; }
+/* Wide columns explicitly opt in to wrapping */
+td.wide { white-space: normal; max-width: 400px; word-break: break-word; }
+
+/* Data grid — compact, single-line, truncated */
+#data-grid { border-collapse: collapse; }
+#data-grid td {
+    max-width: 200px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    border-right: 1px solid var(--border-subtle);
+    height: 32px;
+}
+#data-grid th {
+    border-right: 1px solid var(--border-subtle);
+    height: 30px;
+}
+#data-grid td:last-child, #data-grid th:last-child { border-right: none; }
 
 tr:last-child td { border-bottom: none; }
 
@@ -796,11 +817,14 @@ td.row-num, th.row-num-header {
     text-align: center;
     width: 40px;
     min-width: 40px;
-    max-width: 50px;
+    max-width: 40px;
     user-select: none;
-    border-right: 1px solid var(--border-subtle);
+    border-right: 1px solid var(--border);
     background: var(--bg-2);
     padding: 4px 6px;
+    position: sticky;
+    left: 0;
+    z-index: 5;
 }
 
 /* ─── Badges ──────────────────────────────────────────────────────────── */
@@ -1165,6 +1189,7 @@ kbd {
     color: var(--text-4);
     font-style: italic;
     font-size: var(--font-size-xs);
+    opacity: 0.4;
 }
 
 /* ─── Empty state ─────────────────────────────────────────────────────── */
@@ -2311,6 +2336,74 @@ tbody tr {
 .explain-stat { font-family: var(--font-mono); white-space: nowrap; }
 .explain-children { margin-top: var(--sp-1); }
 
+/* Smart analysis */
+.explain-analysis { margin-bottom: var(--sp-4); }
+
+.explain-score {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-4);
+    padding: var(--sp-4);
+    background: var(--bg-1);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    margin-bottom: var(--sp-4);
+}
+.explain-grade {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.4rem;
+    font-weight: 800;
+    color: #fff;
+    flex-shrink: 0;
+}
+.explain-grade-info { display: flex; flex-direction: column; gap: 2px; }
+.explain-grade-info strong { font-size: var(--font-size-md); color: var(--text-0); }
+.explain-grade-info span { font-size: var(--font-size-xs); color: var(--text-3); }
+
+.explain-suggestions { display: flex; flex-direction: column; gap: var(--sp-2); margin-bottom: var(--sp-4); }
+.explain-suggestion {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--sp-3);
+    padding: var(--sp-3) var(--sp-4);
+    border-radius: var(--radius);
+    font-size: var(--font-size-sm);
+}
+.explain-sug-danger { background: var(--danger-subtle); border-left: 3px solid var(--danger); }
+.explain-sug-warning { background: var(--warning-subtle); border-left: 3px solid var(--warning); }
+.explain-sug-info { background: var(--accent-subtle); border-left: 3px solid var(--accent); }
+.explain-sug-success { background: var(--success-subtle); border-left: 3px solid var(--success); }
+
+.explain-sug-icon { font-size: 1.1rem; flex-shrink: 0; margin-top: 1px; }
+.explain-sug-body { flex: 1; }
+.explain-sug-title { font-weight: 600; color: var(--text-0); margin-bottom: 2px; }
+.explain-sug-detail { color: var(--text-2); line-height: 1.5; }
+.explain-sug-sql {
+    display: block;
+    margin-top: var(--sp-2);
+    padding: var(--sp-2) var(--sp-3);
+    background: var(--bg-2);
+    border-radius: var(--radius);
+    font-family: var(--font-mono);
+    font-size: var(--font-size-xs);
+    color: var(--text-1);
+    cursor: pointer;
+}
+.explain-sug-sql:hover { background: var(--bg-3); }
+
+.explain-bottleneck { border-left-color: var(--danger); border-left-width: 3px; }
+.explain-node-extra {
+    font-size: var(--font-size-xs);
+    color: var(--text-3);
+    font-family: var(--font-mono);
+    padding: 1px 0;
+}
+
 /* ─── ERD Diagram ─────────────────────────────────────────────────────── */
 
 .erd-container {
@@ -2961,10 +3054,7 @@ td a:hover { text-decoration: underline; color: var(--accent); }
     color: var(--text-4);
     font-style: italic;
     font-size: var(--font-size-xs);
-    padding: 1px 4px;
-    background: var(--bg-3);
-    border-radius: 2px;
-    letter-spacing: 0.03em;
+    /* minimal — just dim italic text, no background */
 }
 
 /* ─── Table sticky header shadow ──────────────────────────────────────── */
