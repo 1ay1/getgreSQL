@@ -407,10 +407,136 @@ function toggleSidebar() {
     document.querySelector('.ide').classList.toggle('sidebar-collapsed');
 }
 
-// ─── Inline Cell Editing ─────────────────────────────────────────────────
+// ─── Data Grid: Cell Selection & Inline Editing ─────────────────────────
 
-function editCell(span) {
-    if (span.querySelector('input')) return; // already editing
+(function() {
+    var selectedCell = null;
+
+    // Click on editable cell to select it
+    document.addEventListener('click', function(e) {
+        var cell = e.target.closest('.editable-cell');
+        if (cell) {
+            selectCell(cell);
+            return;
+        }
+        // Click outside deselects
+        if (selectedCell && !e.target.closest('.cell-edit-input')) {
+            deselectCell();
+        }
+    });
+
+    // Double-click to edit
+    document.addEventListener('dblclick', function(e) {
+        var cell = e.target.closest('.editable-cell');
+        if (cell) editCell(cell);
+    });
+
+    // Keyboard navigation on selected cell
+    document.addEventListener('keydown', function(e) {
+        if (!selectedCell || selectedCell.querySelector('.cell-edit-input')) return;
+        var td = selectedCell.closest('td');
+        if (!td) return;
+        var tr = td.closest('tr');
+        if (!tr) return;
+
+        if (e.key === 'Enter' || e.key === 'F2') {
+            e.preventDefault();
+            editCell(selectedCell);
+        } else if (e.key === 'Tab') {
+            e.preventDefault();
+            var next = e.shiftKey ? getPrevCell(td, tr) : getNextCell(td, tr);
+            if (next) selectCell(next);
+        } else if (e.key === 'ArrowRight') {
+            var next = getNextCell(td, tr);
+            if (next) { e.preventDefault(); selectCell(next); }
+        } else if (e.key === 'ArrowLeft') {
+            var prev = getPrevCell(td, tr);
+            if (prev) { e.preventDefault(); selectCell(prev); }
+        } else if (e.key === 'ArrowDown') {
+            var below = getCellBelow(td, tr);
+            if (below) { e.preventDefault(); selectCell(below); }
+        } else if (e.key === 'ArrowUp') {
+            var above = getCellAbove(td, tr);
+            if (above) { e.preventDefault(); selectCell(above); }
+        } else if (e.key === 'Delete' || e.key === 'Backspace') {
+            // Could implement set-to-null here
+        } else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey) {
+            // Start typing to edit
+            editCell(selectedCell, e.key);
+            e.preventDefault();
+        }
+    });
+
+    function selectCell(cell) {
+        if (selectedCell) selectedCell.classList.remove('cell-selected');
+        selectedCell = cell;
+        cell.classList.add('cell-selected');
+        // Highlight the row
+        document.querySelectorAll('tr.row-active').forEach(function(r) { r.classList.remove('row-active'); });
+        var tr = cell.closest('tr');
+        if (tr) tr.classList.add('row-active');
+    }
+
+    function deselectCell() {
+        if (selectedCell) {
+            selectedCell.classList.remove('cell-selected');
+            selectedCell = null;
+        }
+        document.querySelectorAll('tr.row-active').forEach(function(r) { r.classList.remove('row-active'); });
+    }
+
+    function getNextCell(td, tr) {
+        var next = td.nextElementSibling;
+        while (next) {
+            var cell = next.querySelector('.editable-cell');
+            if (cell) return cell;
+            next = next.nextElementSibling;
+        }
+        // Move to next row
+        var nextRow = tr.nextElementSibling;
+        if (nextRow) {
+            var firstCell = nextRow.querySelector('.editable-cell');
+            if (firstCell) return firstCell;
+        }
+        return null;
+    }
+
+    function getPrevCell(td, tr) {
+        var prev = td.previousElementSibling;
+        while (prev) {
+            var cell = prev.querySelector('.editable-cell');
+            if (cell) return cell;
+            prev = prev.previousElementSibling;
+        }
+        var prevRow = tr.previousElementSibling;
+        if (prevRow) {
+            var cells = prevRow.querySelectorAll('.editable-cell');
+            if (cells.length) return cells[cells.length - 1];
+        }
+        return null;
+    }
+
+    function getCellBelow(td, tr) {
+        var idx = Array.from(tr.children).indexOf(td);
+        var nextRow = tr.nextElementSibling;
+        if (nextRow && nextRow.children[idx]) {
+            return nextRow.children[idx].querySelector('.editable-cell');
+        }
+        return null;
+    }
+
+    function getCellAbove(td, tr) {
+        var idx = Array.from(tr.children).indexOf(td);
+        var prevRow = tr.previousElementSibling;
+        if (prevRow && prevRow.children[idx]) {
+            return prevRow.children[idx].querySelector('.editable-cell');
+        }
+        return null;
+    }
+})();
+
+function editCell(span, initialChar) {
+    if (span.querySelector('.cell-edit-input')) return;
 
     var currentValue = span.textContent;
     var col = span.getAttribute('data-col');
@@ -419,44 +545,91 @@ function editCell(span) {
     var db = span.getAttribute('data-db');
     var where = span.getAttribute('data-where');
 
+    span.classList.add('cell-editing');
     var input = document.createElement('input');
     input.type = 'text';
-    input.value = currentValue;
+    input.value = initialChar || currentValue;
     input.className = 'cell-edit-input';
     span.textContent = '';
     span.appendChild(input);
     input.focus();
-    input.select();
+    if (!initialChar) input.select();
+    else input.selectionStart = input.selectionEnd = input.value.length;
 
-    function commit() {
+    var committed = false;
+
+    function commit(moveDirection) {
+        if (committed) return;
+        committed = true;
         var newValue = input.value;
+        span.classList.remove('cell-editing');
+
         if (newValue === currentValue) {
             span.textContent = currentValue;
+            if (moveDirection) moveTo(moveDirection);
             return;
         }
-        // Send update
+
+        span.textContent = newValue;
+        span.classList.add('cell-saving');
+
         fetch('/db/' + db + '/schema/' + schema + '/table/' + table + '/update-cell', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: 'col=' + encodeURIComponent(col) + '&val=' + encodeURIComponent(newValue) + '&where=' + encodeURIComponent(where)
         }).then(function(r) { return r.json(); }).then(function(data) {
+            span.classList.remove('cell-saving');
             if (data.error) {
                 span.textContent = currentValue;
-                alert('Update failed: ' + data.error);
+                span.classList.add('cell-error');
+                setTimeout(function() { span.classList.remove('cell-error'); }, 2000);
             } else {
-                span.textContent = newValue;
-                span.classList.add('cell-updated');
-                setTimeout(function() { span.classList.remove('cell-updated'); }, 1500);
+                span.classList.add('cell-saved');
+                setTimeout(function() { span.classList.remove('cell-saved'); }, 1500);
+                // Update the where clause for this row since the value changed
+                span.closest('tr').querySelectorAll('.editable-cell').forEach(function(c) {
+                    // The where clause contains old values — update this cell's part
+                    var oldWhere = c.getAttribute('data-where');
+                    if (oldWhere) {
+                        c.setAttribute('data-where', oldWhere.replace(
+                            new RegExp('"' + col.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '"\\s*=\\s*\'[^\']*\''),
+                            '"' + col + "' = '" + newValue.replace(/'/g, "''") + "'"
+                        ));
+                    }
+                });
             }
         }).catch(function() {
+            span.classList.remove('cell-saving');
             span.textContent = currentValue;
         });
+
+        if (moveDirection) moveTo(moveDirection);
     }
 
-    input.addEventListener('blur', commit);
+    function moveTo(dir) {
+        var td = span.closest('td');
+        var tr = td ? td.closest('tr') : null;
+        if (!td || !tr) return;
+        var target = null;
+        if (dir === 'right') {
+            var next = td.nextElementSibling;
+            while (next) { target = next.querySelector('.editable-cell'); if (target) break; next = next.nextElementSibling; }
+        } else if (dir === 'down') {
+            var idx = Array.from(tr.children).indexOf(td);
+            var nextRow = tr.nextElementSibling;
+            if (nextRow && nextRow.children[idx]) target = nextRow.children[idx].querySelector('.editable-cell');
+        }
+        if (target) {
+            target.classList.add('cell-selected');
+            target.closest('tr').classList.add('row-active');
+        }
+    }
+
+    input.addEventListener('blur', function() { if (!committed) commit(null); });
     input.addEventListener('keydown', function(e) {
-        if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
-        if (e.key === 'Escape') { span.textContent = currentValue; }
+        if (e.key === 'Enter') { e.preventDefault(); commit('down'); }
+        else if (e.key === 'Tab') { e.preventDefault(); commit(e.shiftKey ? null : 'right'); }
+        else if (e.key === 'Escape') { committed = true; span.classList.remove('cell-editing'); span.textContent = currentValue; }
     });
 }
 

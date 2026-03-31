@@ -728,7 +728,7 @@ auto TableBrowseHandler::handle(Request& req, AppContext& ctx) -> Response {
                 auto display = val.size() > 200 ? html::escape(val.substr(0, 200)) + "..." : html::escape(val);
                 cells.push_back(std::format(
                     "<span class=\"editable-cell\" data-col=\"{}\" data-schema=\"{}\" data-table=\"{}\" "
-                    "data-db=\"{}\" data-where=\"{}\" ondblclick=\"editCell(this)\">{}</span>",
+                    "data-db=\"{}\" data-where=\"{}\">{}</span>",
                     html::escape(result->column_name(c)), html::escape(schema_name),
                     html::escape(table_name), html::escape(db_name),
                     html::escape(where_parts), display
