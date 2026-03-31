@@ -1,4 +1,0 @@
-/home/ayush/projects/getgreSQL/build-rel/CMakeFiles/getgresql.dir
-/home/ayush/projects/getgreSQL/build-rel/CMakeFiles/embed_assets.dir
-/home/ayush/projects/getgreSQL/build-rel/CMakeFiles/edit_cache.dir
-/home/ayush/projects/getgreSQL/build-rel/CMakeFiles/rebuild_cache.dir

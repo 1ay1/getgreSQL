@@ -761,6 +761,9 @@ function openCellModal(span) {
     document.body.appendChild(overlay);
 
     var textarea = modal.querySelector('textarea');
+    // Auto-size to content
+    textarea.style.height = 'auto';
+    textarea.style.height = Math.min(Math.max(80, textarea.scrollHeight), window.innerHeight * 0.6) + 'px';
     textarea.focus();
     textarea.selectionStart = textarea.selectionEnd = textarea.value.length;
 

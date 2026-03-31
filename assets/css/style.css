@@ -1343,13 +1343,16 @@ kbd {
 /* ─── Size bar chart ──────────────────────────────────────────────────── */
 
 .size-bar {
-    display: flex;
-    align-items: center;
-    gap: var(--sp-3);
+    width: 100%;
+    max-width: 120px;
+    height: 6px;
+    background: var(--bg-3);
+    border-radius: 3px;
+    overflow: hidden;
 }
 
 .size-bar-fill {
-    height: 6px;
+    height: 100%;
     background: var(--accent);
     border-radius: 3px;
     min-width: 2px;
@@ -2572,12 +2575,12 @@ pre code {
     width: 600px;
     max-width: 90vw;
     max-height: 80vh;
+    height: fit-content;
+    align-self: flex-start;
     background: var(--bg-1);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
-    display: flex;
-    flex-direction: column;
     overflow: hidden;
 }
 
@@ -2614,8 +2617,7 @@ pre code {
 .cell-modal-close:hover { color: var(--text-0); background: var(--bg-3); }
 
 .cell-modal-textarea {
-    flex: 1;
-    min-height: 200px;
+    min-height: 80px;
     max-height: 60vh;
     padding: var(--sp-4);
     background: var(--bg-0);
@@ -2627,6 +2629,7 @@ pre code {
     resize: vertical;
     outline: none;
     tab-size: 2;
+    field-sizing: content;
 }
 
 .cell-modal-footer {

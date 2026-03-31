@@ -117,11 +117,11 @@ auto IndexHandler::handle(Request& /*req*/, AppContext& ctx) -> Response {
             content += std::format(
                 "<tr><td><a href=\"/db/{}/schemas\"><strong>{}</strong></a></td>"
                 "<td class=\"num\">{}</td>"
-                "<td><div class=\"size-bar\"><div class=\"size-bar-fill\" style=\"width:{:.0f}px\"></div></div></td>"
+                "<td><div class=\"size-bar\"><div class=\"size-bar-fill\" style=\"width:{:.0f}%\"></div></div></td>"
                 "<td class=\"num\">{}</td>"
                 "<td>{}</td></tr>",
                 html::escape(d.name), html::escape(d.name), html::escape(d.size),
-                bar_pct * 0.8, d.connections,
+                bar_pct, d.connections,
                 html::badge(std::format("{:.0f}%", d.cache_hit_ratio * 100), cache_variant)
             );
         }

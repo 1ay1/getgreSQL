@@ -1,7 +1,0 @@
-{
-	"InstallScripts" : 
-	[
-		"/home/ayush/projects/getgreSQL/build-rel/cmake_install.cmake"
-	],
-	"Parallel" : false
-}

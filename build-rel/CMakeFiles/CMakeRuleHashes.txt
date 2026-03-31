@@ -1,3 +1,0 @@
-# Hashes of file build rules.
-4ef6e888f98f3a509663a19f828c73c6 CMakeFiles/embed_assets
-c0c54c508d9c3012f26ca34ab6d397a9 generated/embedded_assets.hpp

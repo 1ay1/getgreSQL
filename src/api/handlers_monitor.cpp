@@ -374,7 +374,7 @@ auto DatabaseStatsHandler::handle(Request& /*req*/, AppContext& ctx) -> Response
 
     for (auto& d : *dbs) {
         auto bar_pct = static_cast<double>(d.size_bytes) / max_size * 100;
-        auto bar = std::format("<div class=\"size-bar\"><div class=\"size-bar-fill\" style=\"width:{:.0f}px\"></div></div>", bar_pct * 1.5);
+        auto bar = std::format("<div class=\"size-bar\"><div class=\"size-bar-fill\" style=\"width:{:.0f}%\"></div></div>", bar_pct);
         auto cache_variant = d.cache_hit_ratio < 0.90 ? "danger" : d.cache_hit_ratio < 0.99 ? "warning" : "success";
         auto format_bytes = [](long long b) -> std::string {
             if (b >= 1073741824LL) return std::format("{:.1f} GB", static_cast<double>(b) / 1073741824.0);
