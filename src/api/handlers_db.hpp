@@ -41,6 +41,11 @@ struct TableDataHandler {
     static auto handle(Request& req, AppContext& ctx) -> Response;
 };
 
+// GET /db/{db}/schema/{schema}/table/{table}/columns — columns/indexes/constraints partial
+struct TableColumnsHandler {
+    static auto handle(Request& req, AppContext& ctx) -> Response;
+};
+
 // GET /db/{db}/schema/{schema}/table/{table}/ddl — generate DDL
 struct TableDDLHandler {
     static auto handle(Request& req, AppContext& ctx) -> Response;

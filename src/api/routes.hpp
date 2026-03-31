@@ -35,6 +35,7 @@ using AppRoutes = RouteTable<
     Route<GET, "/db/{db}/schemas",                               SchemaListHandler>,
     Route<GET, "/db/{db}/schema/{schema}/tables",                TableListHandler>,
     Route<GET, "/db/{db}/schema/{schema}/table/{table}",         TableDetailHandler>,
+    Route<GET, "/db/{db}/schema/{schema}/table/{table}/columns",  TableColumnsHandler>,
     Route<GET, "/db/{db}/schema/{schema}/table/{table}/data",    TableDataHandler>,
 
     // Query editor

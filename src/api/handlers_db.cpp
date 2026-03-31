@@ -225,65 +225,77 @@ auto TableListHandler::handle(Request& req, AppContext& ctx) -> Response {
     return Response::html(render_page(std::format("Tables - {}.{}", db, sc), "Dashboard", render));
 }
 
-auto TableDetailHandler::handle(Request& req, AppContext& ctx) -> Response {
+auto TableDetailHandler::handle(Request& req, AppContext& /*ctx*/) -> Response {
     auto db = req.param("db"); auto sc = req.param("schema"); auto tb = req.param("table");
-    auto conn = ctx.pool.checkout();
-    if (!conn) return Response::error(error_message(conn.error()));
-
     auto base = std::format("/db/{}/schema/{}/table/{}", db, sc, tb);
 
     auto render = [&](Html& h) {
         Breadcrumbs::render(std::vector<Crumb>{{"Databases","/databases"},{std::string(db),std::format("/db/{}/schemas",db)},
             {std::string(sc),std::format("/db/{}/schema/{}/tables",db,sc)},{std::string(tb),""}}, h);
 
-        // Tabs + actions
         h.raw("<div style=\"display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--sp-3)\">");
-        SectionTabs::render({{{"Columns","",true},{"Data",base+"/browse"},{"DDL",base+"/ddl"},{"Statistics",base+"/stats"}}}, "tab-content", h);
+        SectionTabs::render({{
+            {"Columns", base+"/columns", true},
+            {"Data", base+"/browse"},
+            {"DDL", base+"/ddl"},
+            {"Statistics", base+"/stats"}
+        }}, "tab-content", h);
         h.raw("<div class=\"btn-group\">");
         h.raw("<button class=\"btn btn-sm\" hx-post=\"").raw(base).raw("/vacuum\" hx-target=\"#action-result\" hx-swap=\"innerHTML\">Vacuum</button>");
         h.raw("<button class=\"btn btn-sm\" hx-post=\"").raw(base).raw("/analyze\" hx-target=\"#action-result\" hx-swap=\"innerHTML\">Analyze</button>");
         h.raw("<button class=\"btn btn-sm btn-danger\" hx-post=\"").raw(base).raw("/truncate\" hx-target=\"#action-result\" hx-swap=\"innerHTML\" hx-confirm=\"TRUNCATE ").text(sc).raw(".").text(tb).raw("?\">Truncate</button>");
-        h.raw("</div></div><div id=\"action-result\"></div><div id=\"tab-content\">");
-
-        // Columns
-        auto cols = pg::describe_columns(conn->get(), sc, tb);
-        if (cols) {
-            Table::begin(h, {{"#","num"},{"Name",""},{"Type",""},{"Nullable",""},{"Default",""},{"PK",""}});
-            for (auto& c : *cols) {
-                Table::row(h, {{std::to_string(c.ordinal), std::format("<code>{}</code>",escape(c.name)),
-                    render_to_string<Badge>(Badge::Props{c.type,"secondary"}), c.nullable?std::string("YES"):std::string("<strong>NO</strong>"),
-                    c.default_value.empty()?std::string("&mdash;"):std::format("<code>{}</code>",escape(c.default_value)),
-                    c.is_primary_key?render_to_string<Badge>(Badge::Props{"PK","primary"}):std::string("")}});
-            }
-            Table::end(h);
-        }
-
-        // Indexes
-        auto idxs = pg::list_indexes(conn->get(), sc, tb);
-        if (idxs && !idxs->empty()) {
-            h.raw("<h3>Indexes</h3>");
-            Table::begin(h, {{"Name",""},{"Definition",""},{"Unique",""},{"Primary",""},{"Size","num"}});
-            for (auto& i : *idxs) {
-                Table::row(h, {{escape(i.name),std::format("<code>{}</code>",escape(i.definition)),
-                    std::string(i.is_unique?"&#10003;":""),std::string(i.is_primary?"&#10003;":""),escape(i.size)}});
-            }
-            Table::end(h);
-        }
-
-        // Constraints
-        auto cons = pg::list_constraints(conn->get(), sc, tb);
-        if (cons && !cons->empty()) {
-            h.raw("<h3>Constraints</h3>");
-            Table::begin(h, {{"Name",""},{"Type",""},{"Definition",""}});
-            for (auto& c : *cons) {
-                Table::row(h, {{escape(c.name),render_to_string<Badge>(Badge::Props{c.type,"secondary"}),std::format("<code>{}</code>",escape(c.definition))}});
-            }
-            Table::end(h);
-        }
+        h.raw("</div></div><div id=\"action-result\"></div>");
+        // Tab content loads via JS tab handler — Columns is default, fires on load
+        h.raw("<div id=\"tab-content\" hx-get=\"").raw(base).raw("/columns\" hx-trigger=\"load\" hx-swap=\"innerHTML\">");
+        h.raw("<div class=\"loading\">Loading columns...</div>");
         h.raw("</div>");
     };
     if (req.is_htmx()) return Response::html(render_partial(render));
     return Response::html(render_page(std::format("{}.{}",sc,tb), "Dashboard", render));
+}
+
+// Columns/Indexes/Constraints partial (loaded by default tab)
+auto TableColumnsHandler::handle(Request& req, AppContext& ctx) -> Response {
+    auto sc = req.param("schema"); auto tb = req.param("table");
+    auto conn = ctx.pool.checkout();
+    if (!conn) return Response::error(error_message(conn.error()));
+
+    auto h = Html::with_capacity(8192);
+
+    auto cols = pg::describe_columns(conn->get(), sc, tb);
+    if (cols) {
+        Table::begin(h, {{"#","num"},{"Name",""},{"Type",""},{"Nullable",""},{"Default",""},{"PK",""}});
+        for (auto& c : *cols) {
+            Table::row(h, {{std::to_string(c.ordinal), std::format("<code>{}</code>",escape(c.name)),
+                render_to_string<Badge>(Badge::Props{c.type,"secondary"}), c.nullable?std::string("YES"):std::string("<strong>NO</strong>"),
+                c.default_value.empty()?std::string("&mdash;"):std::format("<code>{}</code>",escape(c.default_value)),
+                c.is_primary_key?render_to_string<Badge>(Badge::Props{"PK","primary"}):std::string("")}});
+        }
+        Table::end(h);
+    }
+
+    auto idxs = pg::list_indexes(conn->get(), sc, tb);
+    if (idxs && !idxs->empty()) {
+        h.raw("<h3>Indexes</h3>");
+        Table::begin(h, {{"Name",""},{"Definition",""},{"Unique",""},{"Primary",""},{"Size","num"}});
+        for (auto& i : *idxs) {
+            Table::row(h, {{escape(i.name),std::format("<code>{}</code>",escape(i.definition)),
+                std::string(i.is_unique?"&#10003;":""),std::string(i.is_primary?"&#10003;":""),escape(i.size)}});
+        }
+        Table::end(h);
+    }
+
+    auto cons = pg::list_constraints(conn->get(), sc, tb);
+    if (cons && !cons->empty()) {
+        h.raw("<h3>Constraints</h3>");
+        Table::begin(h, {{"Name",""},{"Type",""},{"Definition",""}});
+        for (auto& c : *cons) {
+            Table::row(h, {{escape(c.name),render_to_string<Badge>(Badge::Props{c.type,"secondary"}),std::format("<code>{}</code>",escape(c.definition))}});
+        }
+        Table::end(h);
+    }
+
+    return Response::html(std::move(h).finish());
 }
 
 auto TableDataHandler::handle(Request& req, AppContext& ctx) -> Response {
