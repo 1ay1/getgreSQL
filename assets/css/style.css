@@ -731,6 +731,10 @@ table {
     border-collapse: collapse;
     font-size: var(--font-size-sm);
 }
+td, th { text-align: left; }
+
+/* Let table columns auto-size to content */
+table { table-layout: auto; }
 
 thead { background: var(--bg-2); }
 
@@ -739,7 +743,7 @@ th {
     font-weight: 600;
     color: var(--text-2);
     text-align: left;
-    padding: 6px 10px;
+    padding: 5px 8px;
     border-bottom: 1px solid var(--border);
     white-space: nowrap;
     font-size: var(--font-size-xs);
@@ -755,19 +759,14 @@ th.sorted-asc::after { content: " \25B2"; font-size: 8px; }
 th.sorted-desc::after { content: " \25BC"; font-size: 8px; }
 
 td {
-    padding: 5px 10px;
+    padding: 4px 8px;
     border-bottom: 1px solid var(--border-subtle);
     vertical-align: middle;
-    line-height: 1.4;
+    line-height: 1.35;
     font-size: var(--font-size-sm);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 300px;
 }
 
-/* Allow wrapping for "wide" columns */
-td.wide, th.wide, td:has(.query-preview) { white-space: normal; max-width: 400px; word-break: break-word; }
+td.wide { max-width: 400px; word-break: break-word; }
 
 tr:last-child td { border-bottom: none; }
 
@@ -818,7 +817,7 @@ td.row-num, th.row-num-header {
 }
 .badge-default { background: var(--bg-4); color: var(--text-1); }
 .badge-primary { background: var(--accent-subtle); color: var(--accent); border: 1px solid rgba(56, 139, 253, 0.2); }
-.badge-secondary { background: var(--bg-3); color: var(--text-2); }
+.badge-secondary { background: none; color: var(--text-2); font-weight: 400; padding: 0; }
 .badge-warning { background: var(--warning-subtle); color: var(--warning); border: 1px solid rgba(210, 153, 34, 0.2); }
 .badge-danger { background: var(--danger-subtle); color: var(--danger); border: 1px solid rgba(248, 81, 73, 0.2); }
 .badge-success { background: var(--success-subtle); color: var(--success); border: 1px solid rgba(63, 185, 80, 0.2); }
@@ -2974,12 +2973,11 @@ thead th { box-shadow: 0 1px 0 var(--border); }
 /* ─── Row number column ───────────────────────────────────────────────── */
 /* ─── Better code blocks inside tables ────────────────────────────────── */
 td code {
-    font-size: 0.85em;
-    padding: 1px 5px;
-    background: var(--bg-2);
-    border-radius: 3px;
-    border: 1px solid var(--border-subtle);
-    white-space: nowrap;
+    font-size: 0.9em;
+    background: none;
+    padding: 0;
+    border: none;
+    color: var(--text-0);
 }
 
 /* ─── DDL source — better code display ────────────────────────────────── */
@@ -3053,7 +3051,87 @@ td code {
 }
 
 /* ─── Better checkmark/cross styling in tables ────────────────────────── */
-td:has(> :only-child) { text-align: center; }
+/* ─── Right-click Context Menu ─────────────────────────────────────── */
+
+.ctx-menu {
+    position: fixed;
+    z-index: 10000;
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
+    padding: var(--sp-1) 0;
+    min-width: 220px;
+    max-width: 380px;
+    animation: acPopIn 0.1s ease-out;
+}
+
+.ctx-item {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    padding: 5px 12px;
+    font-size: var(--font-size-sm);
+    color: var(--text-1);
+    cursor: pointer;
+    transition: background 0.05s;
+}
+.ctx-item:hover {
+    background: var(--accent-subtle);
+    color: var(--text-0);
+}
+
+.ctx-icon {
+    width: 22px;
+    text-align: center;
+    font-size: var(--font-size-xs);
+    color: var(--text-3);
+    flex-shrink: 0;
+}
+
+.ctx-sep {
+    height: 1px;
+    background: var(--border-subtle);
+    margin: var(--sp-1) 0;
+}
+
+/* ─── Filter Banner ───────────────────────────────────────────────── */
+
+.filter-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--sp-2) var(--sp-3);
+    background: var(--accent-subtle);
+    border: 1px solid rgba(56, 139, 253, 0.2);
+    border-radius: var(--radius);
+    margin-bottom: var(--sp-2);
+    font-size: var(--font-size-xs);
+    color: var(--accent);
+    animation: fadeSlideIn 0.15s ease-out;
+}
+
+/* ─── Column Filter Input (in header) ─────────────────────────────── */
+
+.col-filter-input {
+    display: block;
+    width: 100%;
+    margin-top: 4px;
+    padding: 2px 6px;
+    background: var(--bg-0);
+    border: 1px solid var(--accent);
+    border-radius: 3px;
+    color: var(--text-0);
+    font-size: var(--font-size-xs);
+    font-family: var(--font-mono);
+    outline: none;
+    box-shadow: 0 0 0 2px var(--accent-subtle);
+}
+
+/* ─── Row number clickable ────────────────────────────────────────── */
+
+td.row-num { cursor: pointer; }
+td.row-num:hover { color: var(--accent); background: var(--accent-subtle); }
 
 /* ─── Command palette polish ──────────────────────────────────────────── */
 .command-overlay {

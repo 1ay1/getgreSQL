@@ -208,7 +208,7 @@ auto TableListHandler::handle(Request& req, AppContext& ctx) -> Response {
         h.raw("<div class=\"schema-nav\">");
         for (auto [href_sfx, label, primary] : std::initializer_list<std::tuple<const char*, const char*, bool>>{
             {"tables","Tables",true},{"functions","Functions",false},{"sequences","Sequences",false},
-            {"indexes","Index Analysis",false},{"erd/page","ERD",false}}) {
+            {"indexes","Index Analysis",false},{"erd/page","ERD",false},{"create-table","+ Create",false}}) {
             h.raw("<a href=\"/db/").raw(db).raw("/schema/").raw(sc).raw("/").raw(href_sfx)
              .raw("\" class=\"btn btn-sm").raw(primary ? " btn-primary" : "").raw("\">").raw(label).raw("</a>");
         }
@@ -243,6 +243,9 @@ auto TableDetailHandler::handle(Request& req, AppContext& /*ctx*/) -> Response {
         h.raw("<button class=\"btn btn-sm\" hx-post=\"").raw(base).raw("/vacuum\" hx-target=\"#action-result\" hx-swap=\"innerHTML\">Vacuum</button>");
         h.raw("<button class=\"btn btn-sm\" hx-post=\"").raw(base).raw("/analyze\" hx-target=\"#action-result\" hx-swap=\"innerHTML\">Analyze</button>");
         h.raw("<button class=\"btn btn-sm btn-danger\" hx-post=\"").raw(base).raw("/truncate\" hx-target=\"#action-result\" hx-swap=\"innerHTML\" hx-confirm=\"TRUNCATE ").text(sc).raw(".").text(tb).raw("?\">Truncate</button>");
+        h.raw("<a href=\"").raw(base).raw("/alter\" class=\"btn btn-sm\">Alter</a>");
+        h.raw("<a href=\"").raw(base).raw("/import\" class=\"btn btn-sm\">Import</a>");
+        h.raw("<button class=\"btn btn-sm btn-danger\" hx-post=\"").raw(base).raw("/drop\" hx-target=\"#action-result\" hx-swap=\"innerHTML\" hx-confirm=\"DROP TABLE ").text(sc).raw(".").text(tb).raw("? This cannot be undone!\">Drop</button>");
         h.raw("</div></div><div id=\"action-result\"></div>");
         // Tab content loads via JS tab handler — Columns is default, fires on load
         h.raw("<div id=\"tab-content\" hx-get=\"").raw(base).raw("/columns\" hx-trigger=\"load\" hx-swap=\"innerHTML\">");

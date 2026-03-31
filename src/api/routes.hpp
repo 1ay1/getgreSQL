@@ -4,6 +4,7 @@
 #include "api/handlers_db.hpp"
 #include "api/handlers_monitor.hpp"
 #include "api/handlers_query.hpp"
+#include "api/handlers_schema.hpp"
 #include "api/handlers_tree.hpp"
 #include "http/router.hpp"
 
@@ -88,6 +89,27 @@ using AppRoutes = RouteTable<
     Route<GET,  "/monitor/vacuum-progress",                         VacuumProgressHandler>,
     Route<GET,  "/monitor/databases",                               DatabaseStatsHandler>,
     Route<GET,  "/monitor/bloat",                                   BloatHandler>,
+
+    // Schema management (CREATE/ALTER/DROP)
+    Route<GET,  "/db/{db}/schema/{schema}/create-table",              CreateTablePageHandler>,
+    Route<POST, "/db/{db}/schema/{schema}/create-table/exec",         CreateTableExecHandler>,
+    Route<GET,  "/db/{db}/schema/{schema}/table/{table}/alter",       AlterTablePageHandler>,
+    Route<POST, "/db/{db}/schema/{schema}/table/{table}/add-column",  AddColumnHandler>,
+    Route<POST, "/db/{db}/schema/{schema}/table/{table}/drop-column", DropColumnHandler>,
+    Route<POST, "/db/{db}/schema/{schema}/table/{table}/add-index",   AddIndexHandler>,
+    Route<POST, "/db/{db}/schema/{schema}/table/{table}/drop-index",  DropIndexHandler>,
+    Route<POST, "/db/{db}/schema/{schema}/table/{table}/rename",      RenameTableHandler>,
+    Route<POST, "/db/{db}/schema/{schema}/table/{table}/drop",        DropTableHandler>,
+    Route<GET,  "/db/{db}/schema/{schema}/table/{table}/import",      ImportPageHandler>,
+    Route<POST, "/db/{db}/schema/{schema}/table/{table}/import/exec", ImportExecHandler>,
+    Route<POST, "/db/{db}/schema/{schema}/table/{table}/exact-count", ExactCountHandler>,
+
+    // Schema diff
+    Route<GET,  "/schema-diff",                                     SchemaDiffPageHandler>,
+    Route<POST, "/schema-diff/exec",                                SchemaDiffExecHandler>,
+
+    // API
+    Route<GET,  "/api/pg-types",                                    PgTypesHandler>,
 
     // EXPLAIN
     Route<GET,  "/explain",                                         ExplainPageHandler>,

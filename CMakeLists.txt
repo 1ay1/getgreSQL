@@ -22,6 +22,7 @@ add_executable(getgresql
     src/api/handlers_query.cpp
     src/api/handlers_monitor.cpp
     src/api/handlers_admin.cpp
+    src/api/handlers_schema.cpp
     src/api/handlers_tree.cpp
     src/api/handlers_static.cpp
     src/config/config.cpp
