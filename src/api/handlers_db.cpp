@@ -390,10 +390,10 @@ auto DashboardTopTablesHandler::handle(Request& /*req*/, AppContext& ctx) -> Res
             h.raw("<span class=\"dash-bar-name\"><a href=\"/db/postgres/schema/")
              .text(schema).raw("/table/").text(table).raw("\" data-spa>")
              .text(schema).raw(".").text(table).raw("</a></span>");
-            h.raw("<div class=\"dash-bar-track\">");
+            h.raw("<span class=\"dash-bar-track\"><div>");
             h.raw(std::format("<div class=\"dash-bar-fill{}\" style=\"width:{:.1f}%\"></div>",
                 dead_pct > 20 ? " dash-bar-warn" : "", pct));
-            h.raw("</div>");
+            h.raw("</div></span>");
             h.raw("<span class=\"dash-bar-value\">").text(size).raw("</span>");
             h.raw("<span class=\"dash-bar-meta\">").raw(live).raw(" rows");
             if (dead_pct > 5) {
