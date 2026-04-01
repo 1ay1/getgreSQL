@@ -727,14 +727,10 @@ auto TableBrowseHandler::handle(Request& req, AppContext& ctx) -> Response {
     }
 
 
-    // Fetch data WITH ctid for row identification (fast, small response)
-    auto data_sql = std::format("SELECT ctid, * FROM \"{}\".\"{}\"", schema_name, table_name);
-    if (!sort_col.empty()) {
-        data_sql += std::format(" ORDER BY \"{}\" {}", sort_col, (sort_dir == "desc") ? "DESC" : "ASC");
-    }
-    data_sql += std::format(" LIMIT {} OFFSET {}", limit, offset);
-
-    auto result = conn->get().exec(data_sql);
+    // Type-safe: identifiers quoted, limit/offset use $1/$2
+    auto browse_query = pg::sql::browse(schema_name, table_name, limit, offset,
+                                         sort_col, sort_dir);
+    auto result = conn->get().exec(browse_query);
     if (!result) return Response::html(
         std::format("<div class=\"query-error\">{}</div>", escape(error_message(result.error())))
     );
@@ -812,12 +808,9 @@ auto CellUpdateHandler::handle(Request& req, AppContext& ctx) -> Response {
     auto conn = ctx.pool.checkout();
     if (!conn) return Response::json("{\"error\":\"Connection failed\"}", 500);
 
-    std::string escaped_val;
-    for (char c : val) { if (c == '\'') escaped_val += "''"; else escaped_val += c; }
-
-    auto sql = std::format("UPDATE \"{}\".\"{}\" SET \"{}\" = '{}' WHERE ctid = '{}'",
-        schema_name, table_name, col, escaped_val, ctid);
-    auto result = conn->get().exec(sql);
+    // Type-safe: uses $1/$2 placeholders — SQL injection impossible
+    auto query = pg::sql::update_cell(schema_name, table_name, col, val, ctid);
+    auto result = conn->get().exec(query);
     if (!result) {
         return Response::json(std::format("{{\"error\":\"{}\"}}", json_escape_str(error_message(result.error()))), 400);
     }
@@ -838,8 +831,8 @@ auto RowDeleteHandler::handle(Request& req, AppContext& ctx) -> Response {
     auto conn = ctx.pool.checkout();
     if (!conn) return Response::html(render_to_string<Alert>(Alert::Props{error_message(conn.error()), "error"}));
 
-    auto sql = std::format("DELETE FROM \"{}\".\"{}\" WHERE ctid = '{}'", schema_name, table_name, ctid);
-    auto result = conn->get().exec(sql);
+    auto query = pg::sql::delete_row(schema_name, table_name, ctid);
+    auto result = conn->get().exec(query);
     if (!result) return Response::html(render_to_string<Alert>(Alert::Props{error_message(result.error()), "error"}));
 
     auto browse_url = std::format("/db/{}/schema/{}/table/{}/browse", db_name, schema_name, table_name);
@@ -862,25 +855,36 @@ auto RowInsertHandler::handle(Request& req, AppContext& ctx) -> Response {
     auto cols_res = pg::describe_columns(conn->get(), schema_name, table_name);
     if (!cols_res) return Response::html(render_to_string<Alert>(Alert::Props{error_message(cols_res.error()), "error"}));
 
-    std::string col_names, values;
+    // Collect non-empty columns and values
+    std::vector<std::string> insert_cols;
+    std::vector<std::string> insert_vals;
     int col_idx = 0;
     for (auto& c : *cols_res) {
-        auto val = form_value(body, std::format("col_{}", col_idx));
-        if (!val.empty()) {
-            if (!col_names.empty()) { col_names += ", "; values += ", "; }
-            col_names += std::format("\"{}\"", c.name);
-            // Escape single quotes
-            std::string escaped;
-            for (char ch : val) { if (ch == '\'') escaped += "''"; else escaped += ch; }
-            values += std::format("'{}'", escaped);
+        auto v = form_value(body, std::format("col_{}", col_idx));
+        if (!v.empty()) {
+            insert_cols.push_back(c.name);
+            insert_vals.push_back(v);
         }
         col_idx++;
     }
 
-    if (col_names.empty()) return Response::html(render_to_string<Alert>(Alert::Props{"No values provided", "warning"}));
+    if (insert_cols.empty()) return Response::html(render_to_string<Alert>(Alert::Props{"No values provided", "warning"}));
 
-    auto sql = std::format("INSERT INTO \"{}\".\"{}\" ({}) VALUES ({})", schema_name, table_name, col_names, values);
-    auto result = conn->get().exec(sql);
+    // Build INSERT with $1/$2 placeholders — SQL injection impossible
+    auto q = pg::sql::query();
+    q.raw("INSERT INTO ").id(schema_name, table_name).raw(" (");
+    for (std::size_t i = 0; i < insert_cols.size(); ++i) {
+        if (i > 0) q.raw(", ");
+        q.id(insert_cols[i]);
+    }
+    q.raw(") VALUES (");
+    for (std::size_t i = 0; i < insert_vals.size(); ++i) {
+        if (i > 0) q.raw(", ");
+        q.val(insert_vals[i]);
+    }
+    q.raw(")");
+    auto query = q.build();
+    auto result = conn->get().exec(query);
     if (!result) return Response::html(
         std::format("<div class=\"query-error\">{}</div>", escape(error_message(result.error())))
     );

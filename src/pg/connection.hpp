@@ -3,6 +3,7 @@
 #include "core/expected.hpp"
 #include "core/types.hpp"
 #include "pg/result.hpp"
+#include "pg/sql_dsl.hpp"
 
 #include <concepts>
 #include <libpq-fe.h>
@@ -202,6 +203,38 @@ public:
         }
 
         return PgResult{res};
+    }
+
+    // ── Type-safe SQL DSL execution ─────────────────────────────────
+    // These overloads accept SqlExpr<Safety> from the DSL.
+    // Static and Unsafe queries use PQexec (no params).
+    // Parameterized queries use PQexecParams ($1/$2 placeholders).
+
+    template<sql::SqlSafety Safety>
+    auto exec(const sql::SqlExpr<Safety>& query) const
+        -> Result<PgResult>
+        requires Queryable<State>
+    {
+        if constexpr (std::same_as<Safety, sql::Parameterized>) {
+            // Use PQexecParams for injection-safe parameterized queries
+            auto ptrs = query.param_ptrs();
+            PGresult* res = PQexecParams(
+                conn_.get(), query.sql().c_str(),
+                query.param_count(), nullptr,
+                ptrs.data(), nullptr, nullptr, 0);
+
+            if (!res) return make_error(PgQueryError{PQerrorMessage(conn_.get()), query.sql().substr(0, 200)});
+            auto status = PQresultStatus(res);
+            if (status != PGRES_TUPLES_OK && status != PGRES_COMMAND_OK) {
+                std::string msg = PQresultErrorMessage(res);
+                PQclear(res);
+                return make_error(PgQueryError{std::move(msg), query.sql().substr(0, 200)});
+            }
+            return PgResult{res};
+        } else {
+            // Static and Unsafe: plain exec
+            return exec(query.view());
+        }
     }
 
     // ── Status queries ──────────────────────────────────────────────
