@@ -467,21 +467,21 @@
 .dash-bar-name a:hover { color: var(--accent); text-decoration: underline; }
 
 .dash-bar-track {
-    height: 18px;
-    background: var(--bg-2);
-    border-radius: 9px;
+    height: 8px;
+    background: var(--bg-3);
+    border-radius: var(--radius);
     overflow: hidden;
-    min-width: 60px;
+    min-width: 80px;
 }
 .dash-bar-fill {
     height: 100%;
-    background: linear-gradient(90deg, var(--accent) 0%, color-mix(in srgb, var(--accent) 60%, transparent) 100%);
-    border-radius: 9px;
+    background: var(--accent);
+    border-radius: var(--radius);
     transition: width 0.8s ease-out;
     min-width: 2px;
 }
 .dash-bar-fill.dash-bar-warn {
-    background: linear-gradient(90deg, var(--warning) 0%, color-mix(in srgb, var(--warning) 60%, transparent) 100%);
+    background: var(--warning);
 }
 
 .dash-bar-value {

@@ -3,13 +3,15 @@
 #include "http/server.hpp"
 #include "pg/pool.hpp"
 
+#include <atomic>
 #include <csignal>
 #include <print>
 
-static getgresql::http::Server* g_server = nullptr;
+// Signal handler uses atomic flag — no raw pointer to templated type needed
+static std::atomic<bool> g_shutdown{false};
 
 static void signal_handler(int) {
-    if (g_server) g_server->stop();
+    g_shutdown.store(true, std::memory_order_relaxed);
 }
 
 int main(int argc, char* argv[]) {
@@ -27,25 +29,32 @@ int main(int argc, char* argv[]) {
 
     // Initialize connection pool
     pg::Pool pool(cfg->pg_connstr, cfg->pool_size);
-    auto warm = pool.warm(2);  // pre-create 2 connections
+    auto warm = pool.warm(2);
     if (!warm) {
         std::println(stderr, "Failed to connect to PostgreSQL: {}", error_message(warm.error()));
         return 1;
     }
     std::println("Connection pool ready ({} idle)", pool.idle_count());
 
-    // Build the dispatch function from the compile-time route table
+    // Compile-time dispatch: lambda wraps the RouteTable — no std::function overhead
     auto dispatch = [](http::Request& req, http::AppContext& ctx) -> http::Response {
         return api::AppRoutes::dispatch(req, ctx);
     };
 
-    // Start HTTP server
+    // Server type is deduced from the lambda — full type info preserved
     http::AppContext app_ctx{pool, *cfg};
-    http::Server server(app_ctx, dispatch, cfg->threads);
-    g_server = &server;
+    http::Server server(app_ctx, std::move(dispatch), cfg->threads);
 
-    std::signal(SIGINT, signal_handler);
-    std::signal(SIGTERM, signal_handler);
+    std::signal(SIGINT, [](int) { g_shutdown.store(true); });
+    std::signal(SIGTERM, [](int) { g_shutdown.store(true); });
+
+    // Monitor shutdown flag in a background thread
+    std::jthread shutdown_monitor([&](std::stop_token) {
+        while (!g_shutdown.load(std::memory_order_relaxed)) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+        server.stop();
+    });
 
     server.run();
 

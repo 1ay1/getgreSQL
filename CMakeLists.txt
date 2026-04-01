@@ -17,7 +17,6 @@ add_executable(getgresql
     src/pg/result.cpp
     src/pg/catalog.cpp
     src/pg/monitor.cpp
-    src/http/server.cpp
     src/api/handlers_db.cpp
     src/api/handlers_query.cpp
     src/api/handlers_monitor.cpp

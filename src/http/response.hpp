@@ -1,20 +1,34 @@
 #pragma once
 
 #include <boost/beast/http.hpp>
+#include <cassert>
 #include <string>
 
 namespace getgresql::http {
 
 namespace beast = boost::beast;
 
-// ─── Response builder ───────────────────────────────────────────────
-// Fluent interface for constructing HTTP responses.
+// ─── Response ────────────────────────────────────────────────────────
+// Type-safe HTTP response. Bad states are unrepresentable:
+//   - No public default constructor → must use a factory (html/json/etc.)
+//   - Move-only → no accidental copies
+//   - release() asserts not already consumed
+//
+// Every factory produces a complete, valid HTTP response.
 
 class Response {
     beast::http::response<beast::http::string_body> res_;
+    bool released_ = false;
+
+    // Private: only factories can construct. Prevents empty/invalid responses.
+    Response() { res_.version(11); }
 
 public:
-    Response() { res_.version(11); }
+    // Move-only: prevent accidental copies of response bodies
+    Response(Response&&) = default;
+    Response& operator=(Response&&) = default;
+    Response(const Response&) = delete;
+    Response& operator=(const Response&) = delete;
 
     static auto html(std::string body, unsigned status = 200) -> Response {
         Response r;
@@ -81,28 +95,35 @@ public:
         return r;
     }
 
-    // Set headers
+    // Set headers — asserts response hasn't been consumed
     auto& set(beast::http::field field, std::string_view value) {
+        assert(!released_ && "Response modified after release()");
         res_.set(field, value);
         return *this;
     }
 
     auto& set(std::string_view name, std::string_view value) {
+        assert(!released_ && "Response modified after release()");
         res_.set(name, value);
         return *this;
     }
 
     auto& keep_alive(bool v) {
+        assert(!released_ && "Response modified after release()");
         res_.keep_alive(v);
         return *this;
     }
 
     auto& version(unsigned v) {
+        assert(!released_ && "Response modified after release()");
         res_.version(v);
         return *this;
     }
 
-    auto release() -> beast::http::response<beast::http::string_body> {
+    // Consume the response — can only be called once
+    [[nodiscard]] auto release() -> beast::http::response<beast::http::string_body> {
+        assert(!released_ && "Response::release() called twice");
+        released_ = true;
         return std::move(res_);
     }
 };

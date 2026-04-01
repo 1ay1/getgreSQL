@@ -106,6 +106,33 @@ namespace literals {
     }
 }
 
+// ─── Compile-time param name validation ──────────────────────────────
+// Verifies at compile time that a route path contains a given {param}.
+// Usage:
+//   static_assert(route_has_param<"/db/{db}/schemas">("db"));
+//   static_assert(!route_has_param<"/query">("db")); // compile-time check
+
+template <StaticString Path>
+consteval bool route_has_param(std::string_view name) {
+    constexpr auto sv = Path.sv();
+    for (std::size_t i = 0; i + 1 < sv.size(); ++i) {
+        if (sv[i] == '{') {
+            auto close = sv.size();
+            for (std::size_t j = i + 1; j < sv.size(); ++j) {
+                if (sv[j] == '}') { close = j; break; }
+            }
+            if (close < sv.size()) {
+                auto pname = sv.substr(i + 1, close - i - 1);
+                // Strip trailing "..." for catch-all params
+                if (pname.ends_with("...")) pname = pname.substr(0, pname.size() - 3);
+                if (pname == name) return true;
+                i = close;
+            }
+        }
+    }
+    return false;
+}
+
 // ─── Compile-time path matching ─────────────────────────────────────
 // Given a pattern like "/db/{name}/tables" and a runtime path like
 // "/db/mydb/tables", extract "mydb" into the parameter map.

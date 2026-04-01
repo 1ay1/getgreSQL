@@ -37,13 +37,15 @@ class Request {
         }
     }
 
+    // Only the router can set path match — prevents handlers from mutating routing state
+    void set_path_match(PathMatch m) { path_match_ = m; }
+    template <typename... Routes> friend struct RouteTable;
+
 public:
     explicit Request(beast::http::request<beast::http::string_body> req)
         : req_(std::move(req)) {
         parse_query_string();
     }
-
-    void set_path_match(PathMatch m) { path_match_ = m; }
 
     // Path (without query string)
     auto path() const -> std::string_view {
