@@ -117,25 +117,6 @@ private:
     }
 };
 
-// ─── Island: an interactive component with client hydration ──────────
-// Islands are server-rendered HTML that also get JS behavior.
-// The server renders the initial HTML; JS enhances it.
-
-struct Island {
-    static auto begin(Html& h, std::string_view name, std::string_view id,
-                      std::string_view props_json = "") -> void {
-        h.raw("<div data-island=\"").raw(name).raw("\" id=\"").raw(id).raw("\"");
-        if (!props_json.empty()) {
-            h.raw(" data-props='").raw(props_json).raw("'");
-        }
-        h.raw(">");
-    }
-
-    static auto end(Html& h) -> void {
-        h.raw("</div>");
-    }
-};
-
 // ─── Cache: LRU component cache ──────────────────────────────────────
 // Caches rendered HTML fragments by key with TTL.
 // Thread-safe (uses mutex for concurrent access from worker threads).

@@ -42,7 +42,6 @@ target_link_libraries(getgresql PRIVATE
 add_custom_command(
     OUTPUT ${CMAKE_BINARY_DIR}/generated/embedded_assets.hpp
     COMMAND ${CMAKE_COMMAND} -P ${CMAKE_SOURCE_DIR}/cmake/EmbedAssets.cmake
-        ""
         ${CMAKE_BINARY_DIR}/generated/embedded_assets.hpp
     DEPENDS
         ${CMAKE_SOURCE_DIR}/cmake/EmbedAssets.cmake

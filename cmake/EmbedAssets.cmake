@@ -2,7 +2,7 @@
 # All CSS/JS is now co-located in C++ components.
 # This file exists only to satisfy the build system.
 
-set(OUTPUT_FILE ${CMAKE_ARGV4})
+set(OUTPUT_FILE ${CMAKE_ARGV3})
 
 set(HEADER "#pragma once\n")
 string(APPEND HEADER "#include <string_view>\n")

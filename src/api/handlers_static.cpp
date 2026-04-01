@@ -1,5 +1,5 @@
 #include "api/routes.hpp"
-#include "ssr/component_registry.hpp"
+#include "ssr/components.hpp"
 
 #include <string>
 

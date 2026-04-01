@@ -238,14 +238,6 @@ auto render_child(const typename C::Props& props, Html& h) -> void {
     C::render(props, h);
 }
 
-// Render a component into a trusted HtmlString
-template<Component C>
-auto render_to_safe(const typename C::Props& props, std::size_t cap = 4096) -> HtmlString<Trusted> {
-    auto h = Html::with_capacity(cap);
-    C::render(props, h);
-    return trust(std::move(h).finish());
-}
-
 // ─── ScopedElement (RAII tag) ────────────────────────────────────────
 
 class ScopedElement {
