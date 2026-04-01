@@ -76,29 +76,88 @@ struct Theme {
     --transition-normal: 0.2s ease;
 }
 
-[data-theme="light"] {
-    --bg-0: #ffffff;
-    --bg-1: #f6f8fa;
-    --bg-2: #eef1f5;
-    --bg-3: #d8dee4;
-    --bg-4: #c0c8d2;
-    --border: #d0d7de;
-    --border-subtle: #e1e4e8;
-    --text-0: #1f2328;
-    --text-1: #31363f;
-    --text-2: #656d76;
-    --text-3: #8c959f;
-    --text-4: #afb8c1;
-    --accent: #0969da;
-    --accent-dim: #0550ae;
-    --accent-subtle: rgba(9, 105, 218, 0.08);
-    --success-subtle: rgba(63, 185, 80, 0.08);
-    --warning-subtle: rgba(210, 153, 34, 0.08);
-    --danger-subtle: rgba(248, 81, 73, 0.08);
-    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.08);
-    --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.1);
-    --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.15);
-    --shadow-lift: 0 4px 12px rgba(0, 0, 0, 0.12);
+/* Theme overrides are in src/ssr/components/themes/*.hpp */
+
+/* ─── Theme Picker ────────────────────────────────────────────────────── */
+
+.theme-picker-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.theme-picker {
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+    width: 480px;
+    max-width: 90vw;
+    max-height: 80vh;
+    overflow: auto;
+}
+
+.theme-picker-header {
+    padding: var(--sp-4) var(--sp-5);
+    font-weight: 600;
+    border-bottom: 1px solid var(--border-subtle);
+    color: var(--text-0);
+}
+
+.theme-picker-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: var(--sp-2);
+    padding: var(--sp-4);
+}
+
+@media (max-width: 480px) {
+    .theme-picker-grid { grid-template-columns: repeat(3, 1fr); }
+}
+
+.theme-picker-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--sp-2);
+    padding: var(--sp-2);
+    border-radius: var(--radius);
+    cursor: pointer;
+    transition: background var(--transition-fast);
+    border: 2px solid transparent;
+}
+
+.theme-picker-item:hover {
+    background: var(--bg-3);
+}
+
+.theme-picker-item.active {
+    border-color: var(--accent);
+    background: var(--accent-subtle);
+}
+
+.theme-swatch-preview {
+    width: 100%;
+    aspect-ratio: 16 / 10;
+    border-radius: 3px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font-mono);
+    font-size: var(--font-size-sm);
+    font-weight: 700;
+    border: 1px solid rgba(128, 128, 128, 0.2);
+}
+
+.theme-name {
+    font-size: var(--font-size-xs);
+    color: var(--text-2);
+    text-align: center;
+    line-height: 1.2;
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }

@@ -10,16 +10,101 @@ struct CoreRuntime {
 
 // ─── Theme ───────────────────────────────────────────────────────────────
 
+var THEMES = [
+    {id:'',                 name:'Dark',             bg:'#0d1117', fg:'#58a6ff'},
+    {id:'light',            name:'Light',            bg:'#ffffff', fg:'#0969da'},
+    {id:'monokai',          name:'Monokai',          bg:'#272822', fg:'#f92672'},
+    {id:'dracula',          name:'Dracula',          bg:'#282a36', fg:'#bd93f9'},
+    {id:'nord',             name:'Nord',             bg:'#2e3440', fg:'#88c0d0'},
+    {id:'one-dark',         name:'One Dark',         bg:'#282c34', fg:'#61afef'},
+    {id:'solarized-dark',   name:'Solarized Dark',   bg:'#002b36', fg:'#268bd2'},
+    {id:'solarized-light',  name:'Solarized Light',  bg:'#fdf6e3', fg:'#268bd2'},
+    {id:'catppuccin-mocha', name:'Catppuccin Mocha', bg:'#1e1e2e', fg:'#89b4fa'},
+    {id:'catppuccin-latte', name:'Catppuccin Latte', bg:'#eff1f5', fg:'#1e66f5'},
+    {id:'gruvbox-dark',     name:'Gruvbox Dark',     bg:'#282828', fg:'#83a598'},
+    {id:'gruvbox-light',    name:'Gruvbox Light',    bg:'#fbf1c7', fg:'#076678'},
+    {id:'tokyo-night',      name:'Tokyo Night',      bg:'#1a1b26', fg:'#7aa2f7'},
+    {id:'kanagawa',         name:'Kanagawa',         bg:'#1f1f28', fg:'#7e9cd8'},
+    {id:'rose-pine',        name:'Ros\u00e9 Pine',   bg:'#191724', fg:'#c4a7e7'},
+    {id:'everforest',       name:'Everforest',       bg:'#2d353b', fg:'#7fbbb3'},
+    {id:'ayu-dark',         name:'Ayu Dark',         bg:'#0b0e14', fg:'#e6b450'},
+    {id:'ayu-mirage',       name:'Ayu Mirage',       bg:'#1f2430', fg:'#ffcc66'},
+    {id:'ayu-light',        name:'Ayu Light',        bg:'#fafafa', fg:'#f2ae49'},
+    {id:'palenight',        name:'Palenight',        bg:'#292d3e', fg:'#82aaff'},
+    {id:'moonlight',        name:'Moonlight',        bg:'#1e2030', fg:'#82aaff'},
+    {id:'night-owl',        name:'Night Owl',        bg:'#011627', fg:'#82aaff'},
+    {id:'horizon',          name:'Horizon',          bg:'#1c1e26', fg:'#e95678'},
+    {id:'poimandres',       name:'Poimandres',       bg:'#1b1e28', fg:'#add7ff'},
+    {id:'cobalt2',          name:'Cobalt2',          bg:'#122738', fg:'#ffc600'},
+    {id:'andromeda',        name:'Andromeda',        bg:'#23262e', fg:'#00e8c6'},
+    {id:'shades-of-purple', name:'Shades of Purple', bg:'#1e1e3f', fg:'#fad000'},
+    {id:'vitesse-dark',     name:'Vitesse Dark',     bg:'#121212', fg:'#4d9375'},
+    {id:'midnight',         name:'Midnight',         bg:'#0f0f1e', fg:'#7b68ee'},
+    {id:'github-dimmed',    name:'GitHub Dimmed',    bg:'#22272e', fg:'#539bf5'},
+    {id:'slack-dark',       name:'Slack Dark',       bg:'#1a1d21', fg:'#1d9bd1'},
+    {id:'synthwave',        name:'Synthwave \u201984',bg:'#1a1028', fg:'#ff7edb'},
+    {id:'cyberpunk',        name:'Cyberpunk',        bg:'#0a0a12', fg:'#ff003c'},
+    {id:'matrix',           name:'Matrix',           bg:'#000000', fg:'#00ff41'},
+    {id:'amber',            name:'Amber Terminal',   bg:'#0c0800', fg:'#ffb000'},
+    {id:'tron',             name:'Tron',             bg:'#0a0a0f', fg:'#6ee2ff'},
+    {id:'high-contrast',    name:'High Contrast',    bg:'#000000', fg:'#71b7ff'},
+    {id:'paper',            name:'Paper',            bg:'#f5f0eb', fg:'#8b5c34'}
+];
+
+function applyTheme(id) {
+    if (id) document.documentElement.setAttribute('data-theme', id);
+    else document.documentElement.removeAttribute('data-theme');
+    localStorage.setItem('theme', id);
+}
+
 function toggleTheme() {
-    const html = document.documentElement;
-    const next = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
-    html.setAttribute('data-theme', next);
-    localStorage.setItem('theme', next);
+    // Open theme picker instead of simple toggle
+    if (document.querySelector('.theme-picker-overlay')) { closeThemePicker(); return; }
+
+    var overlay = document.createElement('div');
+    overlay.className = 'theme-picker-overlay';
+    var picker = document.createElement('div');
+    picker.className = 'theme-picker';
+    picker.innerHTML = '<div class="theme-picker-header">Choose Theme</div>';
+
+    var grid = document.createElement('div');
+    grid.className = 'theme-picker-grid';
+
+    var current = localStorage.getItem('theme') || '';
+    THEMES.forEach(function(t) {
+        var item = document.createElement('div');
+        item.className = 'theme-picker-item' + (current === t.id ? ' active' : '');
+        item.setAttribute('data-theme-id', t.id);
+        item.innerHTML =
+            '<div class="theme-swatch-preview" style="background:' + t.bg + '">' +
+            '<span style="color:' + t.fg + '">Aa</span></div>' +
+            '<span class="theme-name">' + t.name + '</span>';
+        item.addEventListener('click', function() {
+            applyTheme(t.id);
+            grid.querySelectorAll('.theme-picker-item').forEach(function(el) { el.classList.remove('active'); });
+            item.classList.add('active');
+        });
+        grid.appendChild(item);
+    });
+
+    picker.appendChild(grid);
+    overlay.appendChild(picker);
+    document.body.appendChild(overlay);
+
+    overlay.addEventListener('click', function(e) { if (e.target === overlay) closeThemePicker(); });
+    document.addEventListener('keydown', function handler(e) {
+        if (e.key === 'Escape') { closeThemePicker(); document.removeEventListener('keydown', handler); }
+    });
+}
+
+function closeThemePicker() {
+    var o = document.querySelector('.theme-picker-overlay');
+    if (o) o.remove();
 }
 
 (function() {
-    const saved = localStorage.getItem('theme');
-    if (saved) document.documentElement.setAttribute('data-theme', saved);
+    var saved = localStorage.getItem('theme');
+    if (saved) applyTheme(saved);
 })();
 
 // ─── Tree View ───────────────────────────────────────────────────────────

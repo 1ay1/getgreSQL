@@ -75,7 +75,7 @@ private:
               "  <div class=\"toolbar-actions\">\n"
               "    <button onclick=\"openCommandPalette()\" class=\"toolbar-icon-btn\" title=\"Command Palette (Ctrl+K)\">&#8984;</button>\n"
               "    <button onclick=\"toggleSidebar()\" class=\"toolbar-icon-btn\" title=\"Toggle Sidebar\">&#9776;</button>\n"
-              "    <button onclick=\"toggleTheme()\" class=\"toolbar-icon-btn\" title=\"Toggle Theme\">&#9680;</button>\n"
+              "    <button onclick=\"toggleTheme()\" class=\"toolbar-icon-btn\" title=\"Theme\">&#9680;</button>\n"
               "  </div>\n</header>\n");
     }
 

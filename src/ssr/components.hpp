@@ -26,6 +26,7 @@
 
 // ─── Foundation (CSS — design tokens, layout grid, buttons) ─────────
 #include "ssr/components/theme.hpp"
+#include "ssr/components/themes/all.hpp"
 #include "ssr/components/layout_css.hpp"
 #include "ssr/components/buttons.hpp"
 
@@ -71,9 +72,14 @@ namespace getgresql::ssr {
 
 // ─── Component Registry ─────────────────────────────────────────────
 
-using AllComponents = meta::TypeList<
+// Base components (Theme provides :root tokens, AllThemes provides overrides)
+using BaseComponents = meta::TypeList<
     HtmxVendor,
-    Theme, LayoutCSS, Buttons,
+    Theme
+>;
+
+using AppComponents = meta::TypeList<
+    LayoutCSS, Buttons,
     CoreRuntime, UIHelpers,
     Alert, Badge, Breadcrumbs, HealthCard,
     ProgressBar, SearchInput, SectionTabs,
@@ -84,6 +90,9 @@ using AllComponents = meta::TypeList<
     EditorCSS, DashboardCSS, ConnectionsCSS,
     PolishCSS
 >;
+
+// Final order: Vendor → Theme → AllThemes → App components
+using AllComponents = meta::Concat<meta::Concat<BaseComponents, AllThemes>, AppComponents>;
 
 // Collect all component CSS/JS into single bundle strings.
 // Called once at startup, cached for process lifetime.
