@@ -1238,8 +1238,7 @@ P._rowHTML = function(di, vi) {
         if (this.diffActive && this.diffMap && this.diffMap[di] && this.diffMap[di].changedCols.has(c)) tdCls = ' class="diff-cell-changed"';
 
         p.push('<td', tdCls, '>');
-        if (canEdit) p.push(this._cellEdit(val, isN, fv, col, row.ctid));
-        else p.push(this._cellRO(val, isN, fv, col));
+        p.push(this._cell(val, isN, fv, col, canEdit ? row.ctid : ''));
         p.push('</td>');
     }
 
@@ -1254,36 +1253,42 @@ P._rowHTML = function(di, vi) {
     return p.join('');
 };
 
-P._cellEdit = function(val, isN, fv, col, ctid) {
+// Single cell renderer — same output for table browse AND query results.
+// canEdit cells get htmx edit trigger. ALL cells get data-col + data-table-oid for Explain This.
+P._cell = function(val, isN, fv, col, ctid) {
+    var canEdit = !!ctid;
+    var isLong = !isN && fv.length > 80;
     var p = ['<span class="'];
-    if (isN) p.push('null-value editable-cell');
-    else { p.push('editable-cell'); if (fv.length > 80) p.push(' dv-cell-long'); }
-    p.push('" data-col="', esc(col.name), '"');
-    if (col.tableOid) p.push(' data-table-oid="', col.tableOid, '"');
-    if (!isN && fv.length > 80) p.push(' data-full="', esc(fv), '"');
-    if (ctid) p.push(' data-ctid="', esc(ctid), '"');
+    if (isN) p.push('null-value ');
+    p.push(canEdit ? 'editable-cell' : 'dv-cell');
+    if (isLong) p.push(' dv-cell-long');
+    if (col.type === 'json' && !isN && /^\s*[\[{]/.test(val)) p.push(' dv-type-json');
+    p.push('"');
 
-    p.push(' hx-get="/dv/edit-cell?db=', encP(this.db),
-        '&amp;schema=', encP(this.schema),
-        '&amp;table=', encP(this.tableName),
-        '&amp;table_oid=', col.tableOid || '0',
-        '&amp;col=', encP(col.name),
-        '&amp;ctid=', encP(ctid),
-        '&amp;val=', encP(isN ? '' : fv),
-        '" hx-trigger="dblclick" hx-target="closest td" hx-swap="innerHTML">');
+    // Always include for Explain This
+    if (col.name) p.push(' data-col="', esc(col.name), '"');
+    if (col.tableOid && col.tableOid !== '0') p.push(' data-table-oid="', col.tableOid, '"');
+    if (isLong) p.push(' data-full="', esc(fv), '"');
 
-    if (isN) p.push('NULL</span>');
-    else if (fv.length > 80) p.push(esc(fv.substring(0, 60)), '&hellip;</span>');
-    else p.push(esc(val), '</span>');
+    // Editable: htmx double-click to edit
+    if (canEdit) {
+        p.push(' data-ctid="', esc(ctid), '"');
+        p.push(' hx-get="/dv/edit-cell?db=', encP(this.db),
+            '&amp;schema=', encP(this.schema),
+            '&amp;table=', encP(this.tableName),
+            '&amp;table_oid=', col.tableOid || '0',
+            '&amp;col=', encP(col.name),
+            '&amp;ctid=', encP(ctid),
+            '&amp;val=', encP(isN ? '' : fv),
+            '" hx-trigger="dblclick" hx-target="closest td" hx-swap="innerHTML"');
+    }
+
+    p.push('>');
+    if (isN) p.push('NULL');
+    else if (isLong) p.push(esc(fv.substring(0, 60)), '&hellip;');
+    else p.push(esc(val));
+    p.push('</span>');
     return p.join('');
-};
-
-P._cellRO = function(val, isN, fv, col) {
-    if (isN) return '<span class="null-value dv-cell">NULL</span>';
-    if (fv.length > 200) return '<span class="dv-cell dv-cell-long" data-full="' + esc(fv) + '">' + esc(fv.substring(0, 200)) + '&hellip;</span>';
-    if (col.type === 'json' && /^\s*[\[{]/.test(val))
-        return '<span class="dv-cell dv-type-json" data-full="' + esc(fv) + '">' + esc(val.length > 80 ? val.substring(0, 80) + '\u2026' : val) + '</span>';
-    return '<span class="dv-cell">' + esc(val) + '</span>';
 };
 
 // ─── Selection ──────────────────────────────────────────────────────

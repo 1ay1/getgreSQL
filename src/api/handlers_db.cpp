@@ -558,20 +558,31 @@ auto TableColumnsHandler::handle(Request& req, AppContext& ctx) -> Response {
 }
 
 auto TableDataHandler::handle(Request& req, AppContext& ctx) -> Response {
+    auto db_name = req.param("db");
     auto sc = req.param("schema"); auto tb = req.param("table");
     int limit = 100;
     if (auto ls = req.query("limit"); !ls.empty()) { try { limit = std::stoi(std::string(ls)); } catch(...){} }
     if (limit > 1000) limit = 1000;
     auto conn = ctx.pool.checkout();
     if (!conn) return Response::error(error_message(conn.error()));
+
+    // Get table OID for Explain This
+    unsigned int tbl_oid = 0;
+    if (auto oid_r = conn->get().exec(std::format(
+            "SELECT c.oid FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
+            "WHERE n.nspname='{}' AND c.relname='{}'", sc, tb));
+        oid_r && oid_r->row_count() > 0) {
+        tbl_oid = static_cast<unsigned int>(oid_r->get_int(0, 0).value_or(0));
+    }
+
     auto result = pg::preview_rows(conn->get(), sc, tb, limit);
     if (!result) return Response::error(error_message(result.error()));
 
     auto h = Html::with_capacity(16384);
     std::vector<DCol> cols;
-    for (int c = 0; c < result->col_count(); ++c) cols.push_back({result->column_name(c)});
+    for (int c = 0; c < result->col_count(); ++c) cols.push_back({.name = result->column_name(c), .table_oid = tbl_oid});
     {
-        auto view = DataView::readonly(h, {.row_count = result->row_count()});
+        auto view = DataView::readonly(h, {.row_count = result->row_count(), .db = db_name});
         view.columns(cols);
         for (auto row : *result) {
             std::vector<Cell> cells;
@@ -717,14 +728,16 @@ auto TableBrowseHandler::handle(Request& req, AppContext& ctx) -> Response {
     auto conn = ctx.pool.checkout();
     if (!conn) return Response::html(render_to_string<Alert>(Alert::Props{error_message(conn.error()), "error"}));
 
-    // Count total rows (use estimate for speed on large tables)
-    auto count_res = conn->get().exec(std::format(
-        "SELECT reltuples::bigint FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
+    // Get table OID and row count estimate in one query
+    auto meta_res = conn->get().exec(std::format(
+        "SELECT c.oid, reltuples::bigint FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
         "WHERE n.nspname='{}' AND c.relname='{}'", schema_name, table_name));
     long long total_rows = 0;
-    if (count_res && count_res->row_count() > 0) {
-        total_rows = count_res->get_int(0, 0).value_or(0);
-        if (total_rows < 0) total_rows = 0; // -1 means never analyzed
+    unsigned int table_oid = 0;
+    if (meta_res && meta_res->row_count() > 0) {
+        table_oid = static_cast<unsigned int>(meta_res->get_int(0, 0).value_or(0));
+        total_rows = meta_res->get_int(0, 1).value_or(0);
+        if (total_rows < 0) total_rows = 0;
     }
 
 
@@ -739,9 +752,10 @@ auto TableBrowseHandler::handle(Request& req, AppContext& ctx) -> Response {
     auto base_url = std::format("/db/{}/schema/{}/table/{}/browse", db_name, schema_name, table_name);
 
     // Build column metadata (skip column 0 = ctid)
+    // Set table_oid on every column so Explain This works
     std::vector<DCol> cols;
     for (int c = 1; c < result->col_count(); ++c) {
-        cols.push_back({result->column_name(c)});
+        cols.push_back({.name = result->column_name(c), .table_oid = table_oid});
     }
 
     auto h = Html::with_capacity(16384);

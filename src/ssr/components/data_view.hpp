@@ -189,15 +189,10 @@ public:
             auto col_name = (i < cols_.size()) ? cols_[i].name : std::string_view("");
             auto has_source = (i < cols_.size() && cols_[i].table_oid != 0);
             bool can_edit = !ctid.empty() && has_source;
-            // For Editable mode, all columns are editable (table_oid is the table itself)
             if constexpr (std::same_as<Mode, Editable>) { can_edit = !ctid.empty(); }
 
             h_.raw("<td>");
-            if (can_edit) {
-                render_editable_cell(cell, col_name, ctid, i);
-            } else {
-                render_readonly_cell(cell);
-            }
+            render_cell(cell, col_name, ctid, i, can_edit);
             h_.raw("</td>");
         }
 
@@ -214,55 +209,50 @@ public:
     }
 
 private:
-    // ── Render an editable cell with htmx double-click trigger ──
-    auto render_editable_cell(const Cell& cell, std::string_view col_name,
-                              std::string_view ctid, std::size_t col_idx) -> void {
+    // ── Single cell renderer — used for ALL cells in ALL modes ──
+    // Every cell gets data-col and data-table-oid for Explain This.
+    // Editable cells additionally get htmx double-click-to-edit.
+    auto render_cell(const Cell& cell, std::string_view col_name,
+                     std::string_view ctid, std::size_t col_idx, bool can_edit) -> void {
         auto oid_str = (col_idx < cols_.size()) ? std::to_string(cols_[col_idx].table_oid) : std::string("0");
         auto val = cell.is_null ? std::string_view("") : std::string_view(cell.value);
+        bool is_long = !cell.is_null && cell.value.size() > 80;
 
-        if (cell.is_null) {
-            h_.raw("<span class=\"null-value editable-cell\" data-col=\"").text(col_name).raw("\"");
-        } else {
-            bool is_long = cell.value.size() > 80;
-            h_.raw("<span class=\"editable-cell");
-            if (is_long) h_.raw(" dv-cell-long");
-            h_.raw("\" data-col=\"").text(col_name).raw("\"");
-            if (is_long) h_.raw(" data-full=\"").text(cell.value).raw("\"");
+        // Open span — class depends on editability
+        h_.raw("<span class=\"");
+        if (cell.is_null) h_.raw("null-value ");
+        h_.raw(can_edit ? "editable-cell" : "dv-cell");
+        if (is_long) h_.raw(" dv-cell-long");
+        h_.raw("\"");
+
+        // Always include data-col and data-table-oid for Explain This
+        if (!col_name.empty()) h_.raw(" data-col=\"").text(col_name).raw("\"");
+        if (oid_str != "0") h_.raw(" data-table-oid=\"").raw(oid_str).raw("\"");
+        if (is_long) h_.raw(" data-full=\"").text(cell.value).raw("\"");
+
+        // Editable cells get htmx double-click trigger
+        if (can_edit && !ctid.empty()) {
+            h_.raw(" hx-get=\"/dv/edit-cell?db=").raw(detail::url_encode(db_))
+             .raw("&amp;schema=").raw(detail::url_encode(schema_))
+             .raw("&amp;table=").raw(detail::url_encode(table_))
+             .raw("&amp;table_oid=").raw(oid_str)
+             .raw("&amp;col=").raw(detail::url_encode(col_name))
+             .raw("&amp;ctid=").raw(detail::url_encode(ctid))
+             .raw("&amp;val=").raw(detail::url_encode(val))
+             .raw("\" hx-trigger=\"dblclick\" hx-target=\"closest td\" hx-swap=\"innerHTML\"");
         }
 
-        // Explain-this: data attrs for lineage popover
-        h_.raw(" data-table-oid=\"").raw(oid_str).raw("\"");
+        h_.raw(">");
 
-        // htmx: double-click → server returns inline edit form
-        // URL-encode parameters to handle UTF-8, spaces, special chars
-        h_.raw(" hx-get=\"/dv/edit-cell?db=").raw(detail::url_encode(db_))
-         .raw("&amp;schema=").raw(detail::url_encode(schema_))
-         .raw("&amp;table=").raw(detail::url_encode(table_))
-         .raw("&amp;table_oid=").raw(oid_str)
-         .raw("&amp;col=").raw(detail::url_encode(col_name))
-         .raw("&amp;ctid=").raw(detail::url_encode(ctid))
-         .raw("&amp;val=").raw(detail::url_encode(val))
-         .raw("\" hx-trigger=\"dblclick\" hx-target=\"closest td\" hx-swap=\"innerHTML\">");
-
+        // Content
         if (cell.is_null) {
-            h_.raw("NULL</span>");
-        } else if (cell.value.size() > 80) {
-            h_.text(std::string_view(cell.value).substr(0, 60)).raw("&hellip;</span>");
+            h_.raw("NULL");
+        } else if (is_long) {
+            h_.text(std::string_view(cell.value).substr(0, 60)).raw("&hellip;");
         } else {
-            h_.text(cell.value).raw("</span>");
+            h_.text(cell.value);
         }
-    }
-
-    // ── Render a plain read-only cell (no source table) ─────────
-    auto render_readonly_cell(const Cell& cell) -> void {
-        if (cell.is_null) {
-            h_.raw("<span class=\"null-value dv-cell\">NULL</span>");
-        } else if (cell.value.size() > 200) {
-            h_.raw("<span class=\"dv-cell dv-cell-long\" data-full=\"").text(cell.value).raw("\">");
-            h_.text(std::string_view(cell.value).substr(0, 200)).raw("&hellip;</span>");
-        } else {
-            h_.raw("<span class=\"dv-cell\">").text(cell.value).raw("</span>");
-        }
+        h_.raw("</span>");
     }
 
 private:
