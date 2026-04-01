@@ -3,6 +3,7 @@
 #include "ssr/components.hpp"
 #include "pg/catalog.hpp"
 #include "pg/monitor.hpp"
+#include "pg/result_cache.hpp"
 
 #include <chrono>
 #include <format>
@@ -135,10 +136,13 @@ auto QueryExecHandler::handle(Request& req, AppContext& ctx) -> Response {
         return Response::html(std::move(h).finish());
     }
 
+    constexpr int FIRST_BATCH = 200;
+
     auto h = Html::with_capacity(16384);
 
     if (result->row_count() > 0 || result->col_count() > 0) {
-        int col_start = has_ctid ? 1 : 0;  // skip ctid column in output
+        int col_start = has_ctid ? 1 : 0;
+        int total_rows = result->row_count();
 
         // Build columns with source table OIDs from PQftable
         std::vector<DCol> cols;
@@ -149,26 +153,62 @@ auto QueryExecHandler::handle(Request& req, AppContext& ctx) -> Response {
             });
         }
 
-        auto view = DataView::readonly(h, {
-            .row_count = result->row_count(),
-            .exec_ms = static_cast<int>(ms),
-            .db = conn->get().dbname(),
-        });
-        view.columns(cols);
-
-        for (auto row : *result) {
-            // Get ctid for this row (column 0 if has_ctid)
-            auto ctid = has_ctid ? std::string_view(row[0]) : std::string_view("");
-
-            std::vector<Cell> cells;
-            for (int c = col_start; c < row.col_count(); ++c) {
-                if (row.is_null(c)) {
-                    cells.push_back({.is_null = true});
-                } else {
-                    cells.push_back({.value = std::string(row[c])});
-                }
+        // If more rows than first batch, cache result for streaming
+        std::string stream_id;
+        if (total_rows > FIRST_BATCH) {
+            stream_id = pg::result_cache().store(
+                std::move(*result), has_ctid, col_start,
+                conn->get().dbname());
+            // Re-acquire pointer via cache for rendering first batch
+            auto* cached = pg::result_cache().get(stream_id);
+            if (!cached) {
+                return Response::html(render_to_string<Alert>({"Internal cache error", "error"}));
             }
-            view.row(cells, ctid);
+            result.emplace(pg::PgResult(nullptr)); // moved away, use cache
+
+            auto view = DataView::readonly(h, {
+                .row_count = total_rows,
+                .exec_ms = static_cast<int>(ms),
+                .db = cached->db_name,
+                .stream_id = stream_id,
+            });
+            view.columns(cols);
+
+            // Render first batch from cache
+            auto& res = *cached->result;
+            for (int r = 0; r < FIRST_BATCH && r < total_rows; ++r) {
+                auto ctid = has_ctid ? std::string_view(res.get(r, 0)) : std::string_view("");
+                std::vector<Cell> cells;
+                for (int c = col_start; c < res.col_count(); ++c) {
+                    if (res.is_null(r, c)) {
+                        cells.push_back({.is_null = true});
+                    } else {
+                        cells.push_back({.value = std::string(res.get(r, c))});
+                    }
+                }
+                view.row(cells, ctid);
+            }
+        } else {
+            // Small result — render all rows directly
+            auto view = DataView::readonly(h, {
+                .row_count = total_rows,
+                .exec_ms = static_cast<int>(ms),
+                .db = conn->get().dbname(),
+            });
+            view.columns(cols);
+
+            for (int r = 0; r < total_rows; ++r) {
+                auto ctid = has_ctid ? std::string_view(result->get(r, 0)) : std::string_view("");
+                std::vector<Cell> cells;
+                for (int c = col_start; c < result->col_count(); ++c) {
+                    if (result->is_null(r, c)) {
+                        cells.push_back({.is_null = true});
+                    } else {
+                        cells.push_back({.value = std::string(result->get(r, c))});
+                    }
+                }
+                view.row(cells, ctid);
+            }
         }
     } else {
         auto affected = std::string(result->affected_rows());
@@ -179,6 +219,100 @@ auto QueryExecHandler::handle(Request& req, AppContext& ctx) -> Response {
     }
 
     return Response::html(std::move(h).finish());
+}
+
+// ─── QueryRowsHandler — serve row batches from cache ────────────────
+
+auto QueryRowsHandler::handle(Request& req, AppContext& /*ctx*/) -> Response {
+    auto id = std::string(req.query("id"));
+    auto offset_str = req.query("offset");
+    auto limit_str = req.query("limit");
+
+    int offset = offset_str.empty() ? 0 : std::stoi(std::string(offset_str));
+    int limit = limit_str.empty() ? 200 : std::stoi(std::string(limit_str));
+    limit = std::min(limit, 500); // cap batch size
+
+    auto* cached = pg::result_cache().get(id);
+    if (!cached) {
+        return Response::json(R"({"done":true,"rows":0})", 200);
+    }
+
+    auto& res = *cached->result;
+    int total = res.row_count();
+    int col_start = cached->col_start;
+    bool has_ctid = cached->has_ctid;
+    int end = std::min(offset + limit, total);
+
+    // Render row batch as HTML <tr> elements
+    auto h = Html::with_capacity(static_cast<std::size_t>((end - offset) * 256));
+
+    for (int r = offset; r < end; ++r) {
+        auto ctid = has_ctid ? std::string_view(res.get(r, 0)) : std::string_view("");
+        h.raw("<tr");
+        if (!ctid.empty()) h.raw(" data-ctid=\"").text(ctid).raw("\"");
+        h.raw(">");
+
+        for (int c = col_start; c < res.col_count(); ++c) {
+            h.raw("<td>");
+            if (res.is_null(r, c)) {
+                h.raw("<span class=\"null-value dv-cell\">NULL</span>");
+            } else {
+                auto val = res.get(r, c);
+                h.raw("<span class=\"dv-cell\"");
+                auto col_name = res.column_name(c);
+                if (!col_name.empty()) h.raw(" data-col=\"").text(col_name).raw("\"");
+                auto table_oid = res.column_table_oid(c);
+                if (table_oid != 0) h.raw(" data-table-oid=\"").raw(std::to_string(table_oid)).raw("\"");
+                if (val.size() > 80) {
+                    h.raw(" data-full=\"").text(val).raw("\" class=\"dv-cell dv-cell-long\">");
+                    h.text(val.substr(0, 60)).raw("&hellip;");
+                } else {
+                    h.raw(">").text(val);
+                }
+                h.raw("</span>");
+            }
+            h.raw("</td>");
+        }
+        h.raw("</tr>\n");
+    }
+
+    // Wrap in JSON with metadata
+    auto rows_html = std::move(h).finish();
+    auto done = (end >= total);
+
+    // If done, clean up cache
+    if (done) {
+        pg::result_cache().remove(id);
+    }
+
+    // Return as JSON with HTML payload
+    auto jh = Html::with_capacity(rows_html.size() + 128);
+    jh.raw("{\"html\":\"");
+    // JSON-escape the HTML
+    for (char c : rows_html) {
+        switch (c) {
+            case '"':  jh.raw("\\\""); break;
+            case '\\': jh.raw("\\\\"); break;
+            case '\n': jh.raw("\\n"); break;
+            case '\r': break;
+            case '\t': jh.raw("\\t"); break;
+            default:
+                if (static_cast<unsigned char>(c) < 0x20) {
+                    jh.raw("\\u00");
+                    jh.raw("0123456789abcdef"[(c >> 4) & 0xf]);
+                    jh.raw("0123456789abcdef"[c & 0xf]);
+                } else {
+                    jh.raw(c);
+                }
+        }
+    }
+    jh.raw("\",\"offset\":").raw(std::to_string(offset));
+    jh.raw(",\"count\":").raw(std::to_string(end - offset));
+    jh.raw(",\"total\":").raw(std::to_string(total));
+    jh.raw(",\"done\":").raw(done ? "true" : "false");
+    jh.raw("}");
+
+    return Response::json(std::move(jh).finish());
 }
 
 // ─── CompletionsHandler ─────────────────────────────────────────────

@@ -77,6 +77,7 @@ struct ReadOnlyOpts {
     int exec_ms = 0;
     std::string_view command_tag;  // non-empty for INSERT/UPDATE/DELETE results
     std::string_view db;           // for htmx edit URLs on query result cells
+    std::string_view stream_id;    // non-empty = batch streaming enabled
 };
 
 struct EditableOpts {
@@ -268,7 +269,12 @@ private:
 struct DataView {
     // ── ReadOnly factory ────────────────────────────────────────
     static auto readonly(Html& h, const ReadOnlyOpts& o) -> DataViewScope<ReadOnly> {
-        h.raw("<div class=\"data-view\">\n");
+        h.raw("<div class=\"data-view\"");
+        if (!o.stream_id.empty()) {
+            h.raw(" data-stream-id=\"").text(o.stream_id).raw("\"");
+            h.raw(" data-stream-total=\"").raw(std::to_string(o.row_count)).raw("\"");
+        }
+        h.raw(">\n");
         render_info_bar(h, o.row_count, o.exec_ms, o.command_tag);
         render_toolbar(h, false, {}, {}, {}, 0, 0, 0, {});
         return DataViewScope<ReadOnly>(DataViewScope<ReadOnly>::Key{}, h, o.db);

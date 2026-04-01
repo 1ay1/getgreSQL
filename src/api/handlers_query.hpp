@@ -21,6 +21,11 @@ struct ExplainExecHandler {
     static auto handle(Request& req, AppContext& ctx) -> Response;
 };
 
+// GET /query/rows — batch fetch rows from a cached result
+struct QueryRowsHandler {
+    static auto handle(Request& req, AppContext& ctx) -> Response;
+};
+
 // GET /api/completions — JSON metadata for SQL editor autocomplete
 struct CompletionsHandler {
     static auto handle(Request& req, AppContext& ctx) -> Response;

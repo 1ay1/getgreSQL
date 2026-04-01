@@ -455,6 +455,75 @@ tr.dv-row-selected td {
 }
 
 
+/* ─── Column Quick Stats Tooltip ──────────────────────────────────────── */
+
+.dv-col-stats-tip {
+    position: fixed;
+    z-index: 10001;
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: var(--sp-3);
+    font-family: var(--font-mono);
+    font-size: var(--font-size-xs);
+    color: var(--text-1);
+    white-space: pre;
+    line-height: 1.6;
+    box-shadow: var(--shadow-md);
+    pointer-events: none;
+    animation: dv-stats-in 0.15s ease-out;
+}
+@keyframes dv-stats-in {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* ─── Type-Aware Rendering ───────────────────────────────────────────── */
+
+.dv-type-bool {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    font-family: var(--font-mono);
+}
+.dv-bool-true {
+    background: rgba(63, 185, 80, 0.12);
+    color: var(--success);
+}
+.dv-bool-false {
+    background: rgba(248, 81, 73, 0.08);
+    color: var(--text-3);
+}
+
+.dv-type-num {
+    font-variant-numeric: tabular-nums;
+}
+
+/* ─── Streaming indicator ─────────────────────────────────────────────── */
+
+.stream-indicator {
+    font-weight: 400;
+    color: var(--accent);
+    animation: stream-fade 1.5s ease-in-out infinite;
+}
+@keyframes stream-fade {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+}
+.stream-spinner {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border: 2px solid var(--accent);
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+    vertical-align: middle;
+    margin-right: 4px;
+}
+
 /* ─── Cell Lineage Panel (Explain This — right-click or Ctrl+I) ──────── */
 
 .dv-lineage-panel {
@@ -1951,6 +2020,205 @@ document.addEventListener('input', function(e) {
     if (g) g.setGlobalFilter(e.target.value);
 });
 
+// ─── Column Quick Stats (hover header tooltip) ──────────────────────
+
+P._colStats = function(ci) {
+    var n = this.rows.length, nn = 0, nulls = 0, distinct = {};
+    var min = Infinity, max = -Infinity, sum = 0, numCount = 0;
+    var isNum = this.cols[ci] && this.cols[ci].type === 'numeric';
+
+    for (var i = 0; i < n; i++) {
+        if (this.rows[i].nulls[ci]) { nulls++; continue; }
+        nn++;
+        var v = this.rows[i].full[ci];
+        distinct[v] = true;
+        if (isNum) {
+            var f = parseFloat(v);
+            if (!isNaN(f)) { sum += f; numCount++; if (f < min) min = f; if (f > max) max = f; }
+        }
+    }
+
+    var lines = [];
+    lines.push('Rows: ' + n);
+    lines.push('Distinct: ' + Object.keys(distinct).length);
+    if (nulls > 0) lines.push('Nulls: ' + nulls + ' (' + (nulls / n * 100).toFixed(0) + '%)');
+    if (isNum && numCount > 0) {
+        lines.push('Min: ' + (min % 1 === 0 ? min : min.toFixed(2)));
+        lines.push('Max: ' + (max % 1 === 0 ? max : max.toFixed(2)));
+        lines.push('Avg: ' + (sum / numCount).toFixed(2));
+        lines.push('Sum: ' + (sum % 1 === 0 ? sum : sum.toFixed(2)));
+    }
+    return lines.join('\n');
+};
+
+(function() {
+    var hoverTimer = null;
+    var statsTooltip = null;
+
+    document.addEventListener('mouseenter', function(e) {
+        var th = e.target.closest && e.target.closest('.dv-table th.sortable');
+        if (!th) return;
+        var g = findGrid(th);
+        if (!g || g.rows.length === 0) return;
+        var ci = -1;
+        for (var i = 0; i < g.cols.length; i++) { if (g.cols[i].el === th) { ci = i; break; } }
+        if (ci < 0) return;
+
+        hoverTimer = setTimeout(function() {
+            var text = g._colStats(ci);
+            statsTooltip = document.createElement('div');
+            statsTooltip.className = 'dv-col-stats-tip';
+            statsTooltip.textContent = text;
+            var rect = th.getBoundingClientRect();
+            statsTooltip.style.top = (rect.bottom + 4) + 'px';
+            statsTooltip.style.left = rect.left + 'px';
+            document.body.appendChild(statsTooltip);
+        }, 500);
+    }, true);
+
+    document.addEventListener('mouseleave', function(e) {
+        var th = e.target.closest && e.target.closest('.dv-table th.sortable');
+        if (!th) return;
+        clearTimeout(hoverTimer);
+        if (statsTooltip) { statsTooltip.remove(); statsTooltip = null; }
+    }, true);
+})();
+
+// ─── Type-Aware Cell Rendering ───────────────────────────────────────
+
+// Override _cell to add type formatting
+var _origCell = P._cell;
+P._cell = function(val, isN, fv, col, ctid) {
+    if (isN) return _origCell.call(this, val, isN, fv, col, ctid);
+
+    // Boolean badges
+    if (fv === 't' || fv === 'true' || fv === 'f' || fv === 'false') {
+        var bv = fv === 't' || fv === 'true';
+        var canEdit = !!ctid;
+        var cls = canEdit ? 'editable-cell' : 'dv-cell';
+        var p = '<span class="' + cls + ' dv-type-bool dv-bool-' + bv + '"';
+        if (col.name) p += ' data-col="' + esc(col.name) + '"';
+        if (col.tableOid && col.tableOid !== '0') p += ' data-table-oid="' + col.tableOid + '"';
+        if (canEdit) {
+            p += ' data-ctid="' + esc(ctid) + '"';
+            p += ' hx-get="/dv/edit-cell?db=' + encP(this.db) +
+                '&amp;schema=' + encP(this.schema) +
+                '&amp;table=' + encP(this.tableName) +
+                '&amp;table_oid=' + (col.tableOid || '0') +
+                '&amp;col=' + encP(col.name) +
+                '&amp;ctid=' + encP(ctid) +
+                '&amp;val=' + encP(fv) +
+                '" hx-trigger="dblclick" hx-target="closest td" hx-swap="innerHTML"';
+        }
+        p += '>' + (bv ? 'true' : 'false') + '</span>';
+        return p;
+    }
+
+    // Numeric formatting (add commas for large integers)
+    if (col.type === 'numeric' && fv.length > 4 && /^-?\d+$/.test(fv)) {
+        var formatted = fv.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        var canEdit = !!ctid;
+        var cls = canEdit ? 'editable-cell' : 'dv-cell';
+        var p = '<span class="' + cls + ' dv-type-num"';
+        if (col.name) p += ' data-col="' + esc(col.name) + '"';
+        if (col.tableOid && col.tableOid !== '0') p += ' data-table-oid="' + col.tableOid + '"';
+        p += ' data-full="' + esc(fv) + '"';
+        if (canEdit) {
+            p += ' data-ctid="' + esc(ctid) + '"';
+            p += ' hx-get="/dv/edit-cell?db=' + encP(this.db) +
+                '&amp;schema=' + encP(this.schema) +
+                '&amp;table=' + encP(this.tableName) +
+                '&amp;table_oid=' + (col.tableOid || '0') +
+                '&amp;col=' + encP(col.name) +
+                '&amp;ctid=' + encP(ctid) +
+                '&amp;val=' + encP(fv) +
+                '" hx-trigger="dblclick" hx-target="closest td" hx-swap="innerHTML"';
+        }
+        p += '>' + formatted + '</span>';
+        return p;
+    }
+
+    // Timestamps — show relative time tooltip
+    if (col.type === 'date' && /^\d{4}-\d{2}-\d{2}/.test(fv)) {
+        var base = _origCell.call(this, val, isN, fv, col, ctid);
+        var d = new Date(fv);
+        if (!isNaN(d.getTime())) {
+            var ago = _relTime(d);
+            // Inject title attribute
+            base = base.replace('<span class="', '<span title="' + esc(ago) + '" class="');
+        }
+        return base;
+    }
+
+    return _origCell.call(this, val, isN, fv, col, ctid);
+};
+
+function _relTime(d) {
+    var diff = Date.now() - d.getTime();
+    var abs = Math.abs(diff);
+    if (abs < 60000) return 'just now';
+    if (abs < 3600000) return Math.floor(abs / 60000) + ' min ago';
+    if (abs < 86400000) return Math.floor(abs / 3600000) + ' hours ago';
+    if (abs < 604800000) return Math.floor(abs / 86400000) + ' days ago';
+    return d.toLocaleDateString();
+}
+
+// ─── Paste Into Grid (Ctrl+V) ───────────────────────────────────────
+
+document.addEventListener('paste', function(e) {
+    var act = document.activeElement;
+    if (act && (act.tagName === 'INPUT' || act.tagName === 'TEXTAREA')) return;
+
+    var g = activeGrid;
+    if (!g || !g.cursor || !g.editable) return;
+    if (!g.db || !g.schema || !g.tableName) return;
+
+    var text = (e.clipboardData || window.clipboardData).getData('text');
+    if (!text) return;
+    e.preventDefault();
+
+    var lines = text.split('\n').filter(function(l) { return l.trim(); });
+    var startVR = g.cursor.vr;
+    var startC = g.cursor.c;
+    var updated = 0;
+
+    for (var r = 0; r < lines.length; r++) {
+        var vr = startVR + r;
+        if (vr >= g.viewLen()) break;
+        var di = g.dataIdx(vr);
+        var row = g.rows[di];
+        if (!row.ctid) continue;
+
+        var vals = lines[r].split('\t');
+        for (var c = 0; c < vals.length; c++) {
+            var ci = startC + c;
+            if (ci >= g.cols.length) break;
+            var col = g.cols[ci];
+            var newVal = vals[c];
+            var oldVal = row.full[ci];
+            if (newVal === oldVal) continue;
+
+            // Update in-memory
+            g.updateCellValue(di, ci, newVal, false);
+
+            // Save to DB
+            if (typeof saveCellValue === 'function') {
+                var span = g._getCellSpan(vr, ci);
+                if (span) {
+                    span.textContent = newVal.length > 80 ? newVal.substring(0, 60) + '\u2026' : newVal;
+                    span.classList.add('cell-saving');
+                    saveCellValue(g.db, g.schema, g.tableName, col.name, row.ctid, newVal, span, oldVal);
+                }
+            }
+            updated++;
+        }
+    }
+
+    // Re-render affected area
+    if (g.virtual) { g.vStart = -1; g.vEnd = -1; g._renderVis(); }
+    if (updated > 0) g._toast('Pasted ' + updated + ' cells');
+});
+
 // ═══════════════════════════════════════════════════════════════════
 //  Init
 // ═══════════════════════════════════════════════════════════════════
@@ -1959,7 +2227,124 @@ function initDataViews() {
     document.querySelectorAll('.data-view').forEach(function(el) {
         if (el._grid) return;
         el._grid = new DataGrid(el);
+        // Start streaming if data-stream-id is set
+        if (el.getAttribute('data-stream-id') && !el._streaming) {
+            el._streaming = true;
+            streamRows(el);
+        }
     });
+}
+
+// ─── Streaming row loader ────────────────────────────────────────────
+// Fetches remaining rows in batches from /query/rows, appends to grid
+// incrementally. Grid stays usable during loading. Counter updates live.
+
+function streamRows(dvEl) {
+    var streamId = dvEl.getAttribute('data-stream-id');
+    var total = parseInt(dvEl.getAttribute('data-stream-total') || '0');
+    var grid = dvEl._grid;
+    if (!grid || !streamId) return;
+
+    var BATCH = 200;
+    var offset = grid.rows.length; // start after initially rendered rows
+    var infoBar = dvEl.querySelector('.query-info .rows-badge');
+    var loaded = offset;
+
+    // Show streaming indicator
+    var indicator = document.createElement('span');
+    indicator.className = 'stream-indicator';
+    indicator.innerHTML = ' <span class="stream-spinner"></span> streaming...';
+    if (infoBar) infoBar.appendChild(indicator);
+
+    function updateCounter() {
+        if (infoBar) {
+            var base = infoBar.childNodes[0];
+            if (base) base.textContent = loaded + ' / ' + total + ' rows';
+        }
+    }
+
+    function fetchBatch() {
+        if (offset >= total) {
+            // Done — clean up
+            if (indicator) indicator.remove();
+            if (infoBar) {
+                var base = infoBar.childNodes[0];
+                if (base) base.textContent = total + ' rows';
+            }
+            dvEl.removeAttribute('data-stream-id');
+            return;
+        }
+
+        fetch('/query/rows?id=' + encodeURIComponent(streamId) +
+              '&offset=' + offset + '&limit=' + BATCH)
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (!data.html || data.count === 0) {
+                    // No more rows
+                    if (indicator) indicator.remove();
+                    dvEl.removeAttribute('data-stream-id');
+                    return;
+                }
+
+                // Parse <tr> elements from HTML string
+                var tmp = document.createElement('tbody');
+                tmp.innerHTML = data.html;
+                var newRows = tmp.querySelectorAll('tr');
+
+                // Add rows to grid
+                for (var i = 0; i < newRows.length; i++) {
+                    var tr = newRows[i];
+                    var cells = [], nulls = [], full = [];
+                    for (var c = 0; c < tr.cells.length; c++) {
+                        var td = tr.cells[c];
+                        var span = td.querySelector('.dv-cell, .null-value');
+                        var isNull = !!td.querySelector('.null-value');
+                        var val = '';
+                        if (span) {
+                            val = span.getAttribute('data-full') || span.textContent;
+                        }
+                        nulls.push(isNull);
+                        full.push(isNull ? '' : val);
+                        cells.push(isNull ? 'NULL' : (val.length > 80 ? val.substring(0, 60) : val));
+                    }
+                    var ctid = tr.getAttribute('data-ctid') || '';
+                    grid.rows.push({ ctid: ctid, cells: cells, nulls: nulls, full: full, _tr: null });
+                }
+
+                offset += data.count;
+                loaded = offset;
+                updateCounter();
+
+                // Rebuild view and re-render
+                grid._buildView();
+                if (grid.virtual) {
+                    grid.vStart = -1;
+                    grid.vEnd = -1;
+                    grid._renderVis();
+                } else if (!grid.virtual && grid.rows.length >= 200) {
+                    // Switch to virtual mode now that we have enough rows
+                    grid._enableVirtual();
+                } else {
+                    // Small dataset still — append DOM rows
+                    var tbody = grid.table.tBodies[0];
+                    for (var i = 0; i < newRows.length; i++) {
+                        tbody.appendChild(newRows[i]);
+                    }
+                }
+
+                // Schedule next batch (small delay to keep UI responsive)
+                setTimeout(fetchBatch, 16);
+            })
+            .catch(function() {
+                // On error, stop streaming
+                if (indicator) indicator.remove();
+                dvEl.removeAttribute('data-stream-id');
+            });
+    }
+
+    updateCounter();
+    // Start fetching after a microtask to let the grid initialize
+    setTimeout(fetchBatch, 50);
 }
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initDataViews);

@@ -46,6 +46,7 @@ using AppRoutes = RouteTable<
     // Query editor
     Route<GET,  "/query",                                        QueryPageHandler>,
     Route<POST, "/query/exec",                                   QueryExecHandler>,
+    Route<GET,  "/query/rows",                                   QueryRowsHandler>,
 
     // Table tools
     Route<GET,  "/db/{db}/schema/{schema}/table/{table}/ddl",         TableDDLHandler>,
