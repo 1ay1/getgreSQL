@@ -1,3 +1,11 @@
+#pragma once
+#include "ssr/engine.hpp"
+#include <string_view>
+
+namespace getgresql::ssr {
+
+struct ContextMenu {
+    static constexpr auto js() -> std::string_view { return R"_JS_(
 // ─── Right-click Context Menu — Unified for all DataViews ────────────
 //
 // Context-aware: shows different actions based on cell type.
@@ -448,3 +456,7 @@ document.addEventListener('dblclick', function(e) {
         // For now, just highlight
     }
 });
+)_JS_"; }
+};
+
+} // namespace getgresql::ssr

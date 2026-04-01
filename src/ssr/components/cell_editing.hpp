@@ -1,3 +1,11 @@
+#pragma once
+#include "ssr/engine.hpp"
+#include <string_view>
+
+namespace getgresql::ssr {
+
+struct CellEditing {
+    static constexpr auto js() -> std::string_view { return R"_JS_(
 // ─── Cell Editing & Explain — global functions ──────────────────────────
 //
 // These are called by the DataGrid engine (06-dataview.js) and the
@@ -315,3 +323,7 @@ function openCellModal(span) {
         if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') modal.querySelector('.cell-modal-save').click();
     });
 }
+)_JS_"; }
+};
+
+} // namespace getgresql::ssr

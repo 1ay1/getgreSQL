@@ -49,10 +49,7 @@ private:
               "    <title>");
         h.text(p.title);
         h.raw(" - getgreSQL</title>\n"
-              "    <link rel=\"stylesheet\" href=\"/assets/css/style.css\">\n"
               "    <link rel=\"stylesheet\" href=\"/assets/css/components.css\">\n"
-              "    <script src=\"/assets/js/htmx.min.js\" defer></script>\n"
-              "    <script src=\"/assets/js/app.js\" defer></script>\n"
               "    <script src=\"/assets/js/components.js\" defer></script>\n"
               "</head>\n<body>\n");
     }

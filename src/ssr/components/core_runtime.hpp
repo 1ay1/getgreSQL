@@ -1,3 +1,11 @@
+#pragma once
+#include "ssr/engine.hpp"
+#include <string_view>
+
+namespace getgresql::ssr {
+
+struct CoreRuntime {
+    static constexpr auto js() -> std::string_view { return R"_JS_(
 // getgreSQL — Database IDE client-side interactions
 
 // ─── Theme ───────────────────────────────────────────────────────────────
@@ -339,3 +347,7 @@ document.addEventListener('click', function(e) {
     });
 })();
 
+)_JS_"; }
+};
+
+} // namespace getgresql::ssr

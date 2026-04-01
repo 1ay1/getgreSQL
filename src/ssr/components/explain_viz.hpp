@@ -1,3 +1,11 @@
+#pragma once
+#include "ssr/engine.hpp"
+#include <string_view>
+
+namespace getgresql::ssr {
+
+struct ExplainViz {
+    static constexpr auto js() -> std::string_view { return R"_JS_(
 // ─── Smart EXPLAIN Analyzer ──────────────────────────────────────────────
 // Parses EXPLAIN output, renders visual tree, and generates intelligent
 // optimization suggestions based on DBA best practices.
@@ -302,3 +310,7 @@ function renderExplainResults() {
     });
 }
 
+)_JS_"; }
+};
+
+} // namespace getgresql::ssr

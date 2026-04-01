@@ -1,3 +1,11 @@
+#pragma once
+#include "ssr/engine.hpp"
+#include <string_view>
+
+namespace getgresql::ssr {
+
+struct Buttons {
+    static constexpr auto css() -> std::string_view { return R"_CSS_(
 /* ─── Buttons (global — used everywhere) ─────────────────────────────── */
 
 .btn {
@@ -92,3 +100,8 @@ kbd {
     color: var(--text-2);
     box-shadow: 0 1px 0 var(--border);
 }
+)_CSS_"; }
+
+};
+
+} // namespace getgresql::ssr

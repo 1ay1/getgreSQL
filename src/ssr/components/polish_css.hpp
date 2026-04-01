@@ -1,3 +1,11 @@
+#pragma once
+#include "ssr/engine.hpp"
+#include <string_view>
+
+namespace getgresql::ssr {
+
+struct PolishCSS {
+    static constexpr auto css() -> std::string_view { return R"_CSS_(
 /* ─── Global scrollbars ───────────────────────────────────────────────── */
 * { scrollbar-width: thin; scrollbar-color: var(--bg-4) transparent; }
 ::-webkit-scrollbar { width: 8px; height: 8px; }
@@ -287,3 +295,8 @@ td.row-num:hover { color: var(--accent); background: var(--accent-subtle); }
     width: 0;
 }
 
+)_CSS_"; }
+
+};
+
+} // namespace getgresql::ssr

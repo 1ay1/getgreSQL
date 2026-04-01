@@ -1,3 +1,11 @@
+#pragma once
+#include "ssr/engine.hpp"
+#include <string_view>
+
+namespace getgresql::ssr {
+
+struct LayoutCSS {
+    static constexpr auto css() -> std::string_view { return R"_CSS_(
 /* ─── IDE Layout Grid ─────────────────────────────────────────────────── */
 
 .ide {
@@ -633,3 +641,8 @@ h4 {
     text-decoration: underline;
 }
 
+)_CSS_"; }
+
+};
+
+} // namespace getgresql::ssr

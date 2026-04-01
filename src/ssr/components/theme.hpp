@@ -1,3 +1,11 @@
+#pragma once
+#include "ssr/engine.hpp"
+#include <string_view>
+
+namespace getgresql::ssr {
+
+struct Theme {
+    static constexpr auto css() -> std::string_view { return R"_CSS_(
 /* ─── getgreSQL — Database IDE Design System ─────────────────────────── */
 
 :root {
@@ -114,3 +122,34 @@ a { color: var(--accent); text-decoration: none; transition: color var(--transit
 a:hover { text-decoration: underline; }
 code, pre, .mono { font-family: var(--font-mono); }
 
+/* ─── Global scrollbar styling ───────────────────────────────────────── */
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+    background: var(--bg-4);
+    border-radius: 4px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--text-4); background-clip: content-box; }
+::-webkit-scrollbar-corner { background: transparent; }
+
+/* Firefox */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: var(--bg-4) transparent;
+}
+
+/* ─── Print styles ────────────────────────────────────────────────────── */
+@media print {
+    .sidebar, .toolbar, .status-bar, .tab-bar, .editor-toolbar, .data-toolbar .btn, .dv-toolbar { display: none !important; }
+    .ide { display: block !important; }
+    .workspace { margin: 0 !important; }
+    .content { padding: 0 !important; }
+}
+)_CSS_"; }
+
+};
+
+} // namespace getgresql::ssr

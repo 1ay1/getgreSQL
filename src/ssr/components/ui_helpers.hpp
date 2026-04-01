@@ -1,3 +1,11 @@
+#pragma once
+#include "ssr/engine.hpp"
+#include <string_view>
+
+namespace getgresql::ssr {
+
+struct UIHelpers {
+    static constexpr auto js() -> std::string_view { return R"_JS_(
 // ─── Table Column Sorting ────────────────────────────────────────────────
 
 document.addEventListener('click', function(e) {
@@ -254,3 +262,7 @@ function toggleSidebar() {
     window.spaNavigate = spaNavigate;
 })();
 
+)_JS_"; }
+};
+
+} // namespace getgresql::ssr

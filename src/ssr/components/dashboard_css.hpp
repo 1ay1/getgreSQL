@@ -1,3 +1,11 @@
+#pragma once
+#include "ssr/engine.hpp"
+#include <string_view>
+
+namespace getgresql::ssr {
+
+struct DashboardCSS {
+    static constexpr auto css() -> std::string_view { return R"_CSS_(
 /* HealthCard: co-located in health_card.hpp */
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -525,3 +533,8 @@
 }
 
 /* ─── Dashboard Grid Layout ──────────────────────────────────────────── */
+)_CSS_"; }
+
+};
+
+} // namespace getgresql::ssr

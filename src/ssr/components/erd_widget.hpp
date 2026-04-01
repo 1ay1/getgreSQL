@@ -1,3 +1,11 @@
+#pragma once
+#include "ssr/engine.hpp"
+#include <string_view>
+
+namespace getgresql::ssr {
+
+struct ERDWidget {
+    static constexpr auto js() -> std::string_view { return R"_JS_(
 // ─── ERD SVG Renderer ────────────────────────────────────────────────────
 
 function initERD(container) {
@@ -155,3 +163,7 @@ var SavedQueries = {
 // Data Grid Power Features — makes DBeaver users switch
 // ═══════════════════════════════════════════════════════════════════════
 
+)_JS_"; }
+};
+
+} // namespace getgresql::ssr
