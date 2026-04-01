@@ -112,10 +112,16 @@ auto ExtensionsHandler::handle(Request& req, AppContext& ctx) -> Response {
 auto SettingsHandler::handle(Request& req, AppContext& /*ctx*/) -> Response {
     auto h = Html::with_capacity(4096);
     h.raw(R"(
-<div class="search-box">
-    <input type="search" name="q" placeholder="Search settings..."
-        hx-get="/settings/search" hx-trigger="input changed delay:300ms"
-        hx-target="#settings-results" class="search-input">
+<div class="settings-toolbar">
+    <div class="search-box" style="flex:1">
+        <input type="search" name="q" placeholder="Search settings..."
+            hx-get="/settings/search" hx-trigger="input changed delay:300ms"
+            hx-target="#settings-results" class="search-input">
+    </div>
+    <button class="btn btn-sm btn-warning"
+        hx-post="/settings/reload" hx-target="#reload-status" hx-swap="innerHTML"
+        hx-confirm="Reload PostgreSQL configuration?">&#8635; Reload Config</button>
+    <span id="reload-status"></span>
 </div>
 <div id="settings-results" hx-get="/settings/search" hx-trigger="load">
     <div class="loading">Loading settings...</div>
@@ -585,6 +591,208 @@ auto TerminateHandler::handle(Request& req, AppContext& ctx) -> Response {
     }
 
     return Response::html(render_to_string<Alert>({std::format("Terminated backend PID {}", pid), "info"}));
+}
+
+// ─── SettingsReloadHandler ──────────────────────────────────────────
+
+auto SettingsReloadHandler::handle(Request& /*req*/, AppContext& ctx) -> Response {
+    auto conn = ctx.pool.checkout();
+    if (!conn) return Response::html(render_to_string<Alert>({error_message(conn.error()), "error"}));
+
+    auto result = conn->get().exec("SELECT pg_reload_conf()");
+    if (!result) {
+        return Response::html(render_to_string<Alert>({error_message(result.error()), "error"}));
+    }
+    return Response::html(render_to_string<Alert>({"Configuration reloaded successfully", "success"}));
+}
+
+// ─── UnusedIndexesHandler ──────────────────────────────────────────
+
+auto UnusedIndexesHandler::handle(Request& req, AppContext& ctx) -> Response {
+    auto conn = ctx.pool.checkout();
+    if (!conn) return Response::html(render_to_string<Alert>({error_message(conn.error()), "error"}));
+
+    auto result = conn->get().exec(
+        "SELECT s.schemaname, s.relname AS table, s.indexrelname AS index, "
+        "pg_size_pretty(pg_relation_size(s.indexrelid)) AS size, "
+        "pg_relation_size(s.indexrelid) AS size_bytes, "
+        "s.idx_scan, "
+        "i.indisunique, i.indisprimary, "
+        "pg_get_indexdef(s.indexrelid) AS definition "
+        "FROM pg_stat_user_indexes s "
+        "JOIN pg_index i ON i.indexrelid = s.indexrelid "
+        "WHERE s.idx_scan = 0 "
+        "AND NOT i.indisprimary "
+        "AND NOT i.indisunique "
+        "ORDER BY pg_relation_size(s.indexrelid) DESC"
+    );
+
+    auto render = [&](Html& h) {
+        h.raw("<div style=\"max-width:960px;margin:0 auto;padding:var(--sp-5)\">");
+        h.raw("<div class=\"settings-toolbar\" style=\"margin-bottom:var(--sp-4)\">");
+        h.raw("<h3 style=\"margin:0\">Unused Indexes</h3>");
+        h.raw("<span style=\"color:var(--text-3);font-size:var(--font-size-xs)\">Indexes with zero scans (excluding primary keys and unique constraints)</span>");
+        h.raw("</div>");
+
+        if (!result || result->row_count() == 0) {
+            h.raw("<div class=\"empty-state\"><div class=\"empty-icon\">&#9889;</div>"
+                  "<p>No unused indexes found. Your database is well-optimized.</p></div>");
+        } else {
+            long long total_waste = 0;
+            for (int r = 0; r < result->row_count(); ++r) {
+                if (!result->is_null(r, 4)) total_waste += std::stoll(std::string(result->get(r, 4)));
+            }
+
+            h.raw("<div class=\"query-info\" style=\"margin-bottom:var(--sp-3)\">"
+                  "<span class=\"rows-badge\">").raw(std::to_string(result->row_count()))
+             .raw(" unused indexes</span>"
+                  "<span class=\"time-badge\">Wasting ").raw(
+                      total_waste >= 1048576 ? std::format("{:.1f} MB", total_waste / 1048576.0) :
+                      std::format("{:.1f} KB", total_waste / 1024.0)
+                  ).raw("</span></div>");
+
+            Table::begin(h, {
+                {"Schema", "", true}, {"Table", "", true}, {"Index", "", true},
+                {"Size", "num", true}, {"Definition", "", false}, {"", "", false}
+            });
+            for (int r = 0; r < result->row_count(); ++r) {
+                auto schema = std::string(result->get(r, 0));
+                auto table = std::string(result->get(r, 1));
+                auto index = std::string(result->get(r, 2));
+                auto size = std::string(result->get(r, 3));
+                auto def = std::string(result->get(r, 8));
+                auto def_short = def.size() > 60 ? def.substr(0, 60) + "..." : def;
+
+                auto drop_btn = std::format(
+                    "<button class=\"btn btn-sm btn-danger\" "
+                    "hx-post=\"/admin/drop-index\" "
+                    "hx-vals='{{\"schema\":\"{}\",\"index\":\"{}\"}}' "
+                    "hx-target=\"closest tr\" hx-swap=\"outerHTML\" "
+                    "hx-confirm=\"DROP INDEX {}.{}?\">Drop</button>",
+                    schema, index, schema, index);
+
+                Table::row(h, {{schema, table, index, size,
+                    "<code title=\"" + def + "\">" + def_short + "</code>",
+                    drop_btn}});
+            }
+            Table::end(h);
+        }
+        h.raw("</div>");
+    };
+
+    if (req.is_htmx()) return Response::html(render_partial(render));
+    return Response::html(render_page("Unused Indexes", "Dashboard", render));
+}
+
+// ─── DropIndexHandler ──────────────────────────────────────────────
+
+auto DropIndexHandler::handle(Request& req, AppContext& ctx) -> Response {
+    auto body = std::string(req.body());
+    // Parse JSON body from hx-vals
+    auto extract = [&](std::string_view key) -> std::string {
+        auto needle = "\"" + std::string(key) + "\":\"";
+        auto pos = body.find(needle);
+        if (pos == std::string::npos) return {};
+        auto start = pos + needle.size();
+        auto end = body.find('"', start);
+        return end == std::string::npos ? std::string{} : std::string(body.substr(start, end - start));
+    };
+
+    auto schema = extract("schema");
+    auto index = extract("index");
+    if (schema.empty() || index.empty()) {
+        return Response::html(render_to_string<Alert>({"Missing schema or index name", "warning"}));
+    }
+
+    auto conn = ctx.pool.checkout();
+    if (!conn) return Response::html(render_to_string<Alert>({error_message(conn.error()), "error"}));
+
+    auto sql = "DROP INDEX CONCURRENTLY \"" + schema + "\".\"" + index + "\"";
+    auto result = conn->get().exec(sql);
+    if (!result) {
+        return Response::html("<tr><td colspan=\"6\">" +
+            render_to_string<Alert>({error_message(result.error()), "error"}) + "</td></tr>");
+    }
+
+    // Return empty (row disappears via outerHTML swap)
+    return Response::html("");
+}
+
+// ─── PermissionsHandler ────────────────────────────────────────────
+
+auto PermissionsHandler::handle(Request& req, AppContext& ctx) -> Response {
+    auto conn = ctx.pool.checkout();
+    if (!conn) return Response::html(render_to_string<Alert>({error_message(conn.error()), "error"}));
+
+    // Get role → table permissions
+    auto perms = conn->get().exec(
+        "SELECT grantee, table_schema, table_name, privilege_type, is_grantable "
+        "FROM information_schema.table_privileges "
+        "WHERE grantee NOT IN ('PUBLIC', 'pg_monitor', 'pg_read_all_settings', "
+        "'pg_read_all_stats', 'pg_stat_scan_tables', 'pg_signal_backend', "
+        "'pg_read_server_files', 'pg_write_server_files', 'pg_execute_server_program') "
+        "AND table_schema NOT IN ('pg_catalog', 'information_schema') "
+        "ORDER BY grantee, table_schema, table_name, privilege_type"
+    );
+
+    // Get role memberships
+    auto memberships = conn->get().exec(
+        "SELECT r.rolname AS role, m.rolname AS member_of "
+        "FROM pg_auth_members am "
+        "JOIN pg_roles r ON r.oid = am.roleid "
+        "JOIN pg_roles m ON m.oid = am.member "
+        "ORDER BY m.rolname, r.rolname"
+    );
+
+    auto render = [&](Html& h) {
+        h.raw("<div style=\"max-width:960px;margin:0 auto;padding:var(--sp-5)\">");
+        h.raw("<h3>Permission Audit</h3>");
+
+        // Role memberships
+        if (memberships && memberships->row_count() > 0) {
+            h.raw("<div class=\"dashboard-section\" style=\"margin-bottom:var(--sp-4)\">");
+            h.raw("<div class=\"dashboard-section-header\">Role Memberships</div>");
+            h.raw("<div class=\"dashboard-section-body\">");
+            Table::begin(h, {{"Role", "", true}, {"Member Of", "", true}});
+            for (int r = 0; r < memberships->row_count(); ++r) {
+                Table::row(h, {{std::string(memberships->get(r, 0)), std::string(memberships->get(r, 1))}});
+            }
+            Table::end(h);
+            h.raw("</div></div>");
+        }
+
+        // Table permissions
+        if (!perms || perms->row_count() == 0) {
+            h.raw("<div class=\"empty-state\"><p>No custom table permissions found</p></div>");
+        } else {
+            h.raw("<div class=\"dashboard-section\">");
+            h.raw("<div class=\"dashboard-section-header\">Table Permissions"
+                  "<span class=\"badge\" style=\"margin-left:var(--sp-2)\">").raw(std::to_string(perms->row_count())).raw(" grants</span></div>");
+            h.raw("<div class=\"dashboard-section-body\">");
+            Table::begin(h, {
+                {"Role", "", true}, {"Schema", "", true}, {"Table", "", true},
+                {"Privilege", "", true}, {"Grantable", "", true}
+            });
+            for (int r = 0; r < perms->row_count(); ++r) {
+                auto grantable = std::string(perms->get(r, 4));
+                auto cls = grantable == "YES" ? " class=\"badge badge-success\"" : "";
+                Table::row(h, {{
+                    std::string(perms->get(r, 0)),
+                    std::string(perms->get(r, 1)),
+                    std::string(perms->get(r, 2)),
+                    std::string(perms->get(r, 3)),
+                    grantable == "YES" ? "<span class=\"badge badge-success\">YES</span>" : "NO"
+                }});
+            }
+            Table::end(h);
+            h.raw("</div></div>");
+        }
+
+        h.raw("</div>");
+    };
+
+    if (req.is_htmx()) return Response::html(render_partial(render));
+    return Response::html(render_page("Permissions", "Dashboard", render));
 }
 
 } // namespace getgresql::api

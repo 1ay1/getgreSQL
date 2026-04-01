@@ -24,8 +24,10 @@ auto TreeRootHandler::handle(Request& /*req*/, AppContext& /*ctx*/) -> Response 
     ssr::TreeNode::separator(h);
 
     ssr::TreeNode::leaf(h, "role", "Roles", "/roles", 0);
+    ssr::TreeNode::leaf(h, "role", "Permissions", "/admin/permissions", 0);
     ssr::TreeNode::leaf(h, "ext", "Extensions", "/extensions", 0);
     ssr::TreeNode::leaf(h, "settings", "Settings", "/settings", 0);
+    ssr::TreeNode::leaf(h, "idx", "Unused Indexes", "/admin/unused-indexes", 0);
     ssr::TreeNode::leaf(h, "idx", "Schema Diff", "/schema-diff", 0);
 
     return Response::html(std::move(h).finish());

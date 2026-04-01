@@ -68,6 +68,8 @@ var commandPaletteItems = [
     { label: 'Extensions', icon: '\u2756', href: '/extensions' },
     { label: 'Settings', icon: '\u2699', href: '/settings' },
     { label: 'Connections', icon: '\u{1F50C}', href: '/connections' },
+    { label: 'Unused Indexes', icon: '\u26A0', href: '/admin/unused-indexes' },
+    { label: 'Permissions', icon: '\u{1F512}', href: '/admin/permissions' },
 ];
 
 function openCommandPalette() {

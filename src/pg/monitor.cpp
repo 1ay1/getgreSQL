@@ -566,11 +566,14 @@ auto health_checks(const Connection& conn) -> Result<std::vector<HealthCheck>> {
     );
     if (cache && cache->row_count() > 0) {
         auto ratio = cache->get_double(0, 0).value_or(100.0);
+        auto bad = ratio < 90;
         checks.push_back({
             .name = "Cache Hit Ratio",
             .status = ratio >= 99 ? "ok" : ratio >= 90 ? "warning" : "critical",
             .value = std::format("{:.1f}%", ratio),
-            .detail = ratio < 90 ? "Consider increasing shared_buffers" : "Healthy",
+            .detail = bad ? "Consider increasing shared_buffers" : "Healthy",
+            .fix_action = bad ? "show-setting:shared_buffers" : "",
+            .fix_label = bad ? "View Setting" : "",
         });
     }
 
@@ -583,11 +586,14 @@ auto health_checks(const Connection& conn) -> Result<std::vector<HealthCheck>> {
         auto used = conns->get_int(0, 0).value_or(0);
         auto max = conns->get_int(0, 1).value_or(100);
         auto pct = max > 0 ? (static_cast<double>(used) / max * 100) : 0;
+        auto bad = pct >= 70;
         checks.push_back({
             .name = "Connection Usage",
             .status = pct < 70 ? "ok" : pct < 90 ? "warning" : "critical",
             .value = std::format("{}/{} ({:.0f}%)", used, max, pct),
             .detail = pct >= 90 ? "Near max_connections limit" : "Normal",
+            .fix_action = bad ? "terminate-idle" : "",
+            .fix_label = bad ? "Terminate Idle" : "",
         });
     }
 
@@ -605,6 +611,8 @@ auto health_checks(const Connection& conn) -> Result<std::vector<HealthCheck>> {
             .status = cnt == 0 ? "ok" : cnt <= 2 ? "warning" : "critical",
             .value = std::format("{} sessions", cnt),
             .detail = cnt > 0 ? std::format("Longest: {}s — may hold locks", maxsec) : "None",
+            .fix_action = cnt > 0 ? "terminate-idle-txn" : "",
+            .fix_label = cnt > 0 ? "Terminate All" : "",
         });
     }
 
@@ -620,6 +628,8 @@ auto health_checks(const Connection& conn) -> Result<std::vector<HealthCheck>> {
             .status = cnt == 0 ? "ok" : cnt <= 3 ? "warning" : "critical",
             .value = std::format("{} tables", cnt),
             .detail = cnt > 0 ? "High dead row ratio (>20%)" : "All tables healthy",
+            .fix_action = cnt > 0 ? "vacuum-bloated" : "",
+            .fix_label = cnt > 0 ? "VACUUM All" : "",
         });
     }
 
@@ -638,6 +648,8 @@ auto health_checks(const Connection& conn) -> Result<std::vector<HealthCheck>> {
                 .status = inactive == 0 ? "ok" : "critical",
                 .value = std::format("{}/{} active", rep->row_count() - inactive, rep->row_count()),
                 .detail = inactive > 0 ? "Inactive slots accumulate WAL" : "All slots active",
+                .fix_action = inactive > 0 ? "drop-inactive-slots" : "",
+                .fix_label = inactive > 0 ? "Drop Inactive" : "",
             });
         }
     }
@@ -653,6 +665,8 @@ auto health_checks(const Connection& conn) -> Result<std::vector<HealthCheck>> {
             .status = cnt == 0 ? "ok" : "warning",
             .value = std::to_string(cnt),
             .detail = cnt > 0 ? "Review application lock ordering" : "No deadlocks recorded",
+            .fix_action = cnt > 0 ? "show-blocking" : "",
+            .fix_label = cnt > 0 ? "View Locks" : "",
         });
     }
 

@@ -125,6 +125,16 @@ select.form-input {
     margin-left: var(--sp-3);
 }
 
+/* ─── Settings toolbar ────────────────────────────────────────────── */
+
+.settings-toolbar {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    margin-bottom: var(--sp-4);
+    flex-wrap: wrap;
+}
+
 /* ─── Toolbar connection indicator ────────────────────────────────── */
 
 .toolbar-conn {

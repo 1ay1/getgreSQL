@@ -27,6 +27,11 @@ struct DashboardTopTablesHandler {
     static auto handle(Request& req, AppContext& ctx) -> Response;
 };
 
+// POST /dashboard/fix — execute a health check remediation action
+struct DashboardFixHandler {
+    static auto handle(Request& req, AppContext& ctx) -> Response;
+};
+
 struct DatabaseListHandler {
     static auto handle(Request& req, AppContext& ctx) -> Response;
 };

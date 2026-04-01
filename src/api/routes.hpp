@@ -34,6 +34,7 @@ using AppRoutes = RouteTable<
     Route<GET, "/dashboard/content",                             DashboardContentHandler>,
     Route<GET, "/dashboard/activity",                            DashboardActivityHandler>,
     Route<GET, "/dashboard/top-tables",                          DashboardTopTablesHandler>,
+    Route<POST,"/dashboard/fix",                                 DashboardFixHandler>,
 
     // Database browsing
     Route<GET, "/databases",                                     DatabaseListHandler>,
@@ -76,6 +77,12 @@ using AppRoutes = RouteTable<
     Route<GET, "/extensions",                                       ExtensionsHandler>,
     Route<GET, "/settings",                                         SettingsHandler>,
     Route<GET, "/settings/search",                                  SettingsSearchHandler>,
+    Route<POST,"/settings/reload",                                  SettingsReloadHandler>,
+
+    // Admin tools
+    Route<GET,  "/admin/unused-indexes",                            UnusedIndexesHandler>,
+    Route<POST, "/admin/drop-index",                                DropIndexHandler>,
+    Route<GET,  "/admin/permissions",                               PermissionsHandler>,
 
     // Monitoring
     Route<GET,  "/monitor",                                      MonitorPageHandler>,

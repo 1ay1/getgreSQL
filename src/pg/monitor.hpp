@@ -193,6 +193,8 @@ struct HealthCheck {
     std::string status;    // "ok", "warning", "critical"
     std::string value;
     std::string detail;
+    std::string fix_action; // e.g. "vacuum-all", "terminate-idle", "drop-inactive-slots"
+    std::string fix_label;  // e.g. "Run VACUUM", "Terminate", "Drop Slots"
 };
 
 // ─── Monitor queries ────────────────────────────────────────────────

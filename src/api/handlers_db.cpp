@@ -109,6 +109,14 @@ auto DashboardHealthHandler::handle(Request& /*req*/, AppContext& ctx) -> Respon
             h.raw("<span class=\"dash-check-icon\">").raw(icon).raw("</span>");
             h.raw("<span class=\"dash-check-name\">").text(c.name).raw("</span>");
             h.raw("<span class=\"dash-check-val\">").text(c.value).raw("</span>");
+            if (!c.fix_action.empty() && c.status != "ok") {
+                h.raw("<button class=\"dash-fix-btn\" "
+                      "hx-post=\"/dashboard/fix\" "
+                      "hx-vals='{\"action\":\"").raw(c.fix_action).raw("\"}' "
+                      "hx-target=\"#dash-health\" hx-swap=\"innerHTML\" "
+                      "hx-confirm=\"").text(c.fix_label).raw(" — are you sure?\">"
+                      ).text(c.fix_label).raw("</button>");
+            }
             h.raw("</div>");
         }
         h.raw("</div></div>");
@@ -429,6 +437,137 @@ auto DashboardTopTablesHandler::handle(Request& /*req*/, AppContext& ctx) -> Res
                 h.raw(std::format(" <span class=\"dash-bar-dead\">{:.0f}% dead</span>", dead_pct));
             }
             h.raw("</span></div>");
+        }
+        h.raw("</div>");
+    }
+    h.raw("</div></div>");
+    return Response::html(std::move(h).finish());
+}
+
+// ─── DashboardFixHandler — remediate health check issues ─────────────
+
+auto DashboardFixHandler::handle(Request& req, AppContext& ctx) -> Response {
+    using namespace ssr;
+    auto body = std::string(req.body());
+    auto action = form_value(body, "action");
+
+    auto conn = ctx.pool.checkout();
+    if (!conn) {
+        return Response::html(render_to_string<Alert>({error_message(conn.error()), "error"}));
+    }
+
+    std::string result_msg;
+
+    if (action == "terminate-idle") {
+        // Terminate idle connections older than 5 minutes (not our own)
+        auto r = conn->get().exec(
+            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+            "WHERE state = 'idle' AND pid != pg_backend_pid() "
+            "AND state_change < now() - interval '5 minutes'"
+        );
+        auto cnt = r ? r->row_count() : 0;
+        result_msg = std::format("Terminated {} idle connections", cnt);
+
+    } else if (action == "terminate-idle-txn") {
+        // Terminate idle-in-transaction sessions older than 5 minutes
+        auto r = conn->get().exec(
+            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+            "WHERE state = 'idle in transaction' AND pid != pg_backend_pid() "
+            "AND xact_start < now() - interval '5 minutes'"
+        );
+        auto cnt = r ? r->row_count() : 0;
+        result_msg = std::format("Terminated {} idle-in-transaction sessions", cnt);
+
+    } else if (action == "vacuum-bloated") {
+        // VACUUM tables with >20% dead rows
+        auto tables = conn->get().exec(
+            "SELECT schemaname, relname FROM pg_stat_user_tables "
+            "WHERE n_dead_tup > n_live_tup * 0.2 AND n_live_tup > 100"
+        );
+        int vacuumed = 0;
+        if (tables) {
+            for (auto row : *tables) {
+                auto schema = std::string(row[0]);
+                auto table = std::string(row[1]);
+                auto vq = "VACUUM ANALYZE " + schema + "." + table;
+                conn->get().exec(vq);
+                vacuumed++;
+            }
+        }
+        result_msg = std::format("Vacuumed {} tables", vacuumed);
+
+    } else if (action == "drop-inactive-slots") {
+        // Drop inactive replication slots
+        auto slots = conn->get().exec(
+            "SELECT slot_name FROM pg_replication_slots WHERE NOT active"
+        );
+        int dropped = 0;
+        if (slots) {
+            for (auto row : *slots) {
+                auto name = std::string(row[0]);
+                conn->get().exec("SELECT pg_drop_replication_slot('" + name + "')");
+                dropped++;
+            }
+        }
+        result_msg = std::format("Dropped {} inactive replication slots", dropped);
+
+    } else if (action.starts_with("show-setting:")) {
+        auto setting = action.substr(13);
+        return Response::redirect("/settings/search?q=" + setting);
+
+    } else if (action == "show-blocking") {
+        return Response::redirect("/monitor/blocking");
+
+    } else {
+        return Response::html(render_to_string<Alert>({"Unknown action: " + action, "warning"}));
+    }
+
+    // Clear the health cache so it re-checks after fix
+    cache().clear();
+
+    // Re-render health section with success message + fresh checks
+    auto checks = pg::health_checks(conn->get());
+    auto h = Html::with_capacity(4096);
+
+    // Success toast
+    h.raw("<div class=\"dash-fix-toast\">").text(result_msg).raw("</div>");
+
+    if (!checks) {
+        Alert::render({error_message(checks.error()), "error"}, h);
+        return Response::html(std::move(h).finish());
+    }
+
+    // Re-render the health ribbon (same as DashboardHealthHandler)
+    int ok_count = 0, warn_count = 0, crit_count = 0;
+    for (auto& c : *checks) {
+        if (c.status == "ok") ok_count++;
+        else if (c.status == "warning") warn_count++;
+        else crit_count++;
+    }
+    auto overall = crit_count > 0 ? "critical" : warn_count > 0 ? "degraded" : "healthy";
+    auto overall_cls = crit_count > 0 ? "danger" : warn_count > 0 ? "warning" : "success";
+    h.raw("<div class=\"dash-hero\">");
+    h.raw("<div class=\"dash-hero-status dash-hero-").raw(overall_cls).raw("\">");
+    h.raw("<div class=\"dash-hero-pulse\"></div>");
+    h.raw("<span class=\"dash-hero-dot\"></span>");
+    h.raw("<span class=\"dash-hero-label\">System ").raw(overall).raw("</span>");
+    h.raw("</div>");
+    h.raw("<div class=\"dash-checks\">");
+    for (auto& c : *checks) {
+        auto v = (c.status == "ok") ? "success" : (c.status == "warning") ? "warning" : "danger";
+        auto icon = (c.status == "ok") ? "&#10003;" : (c.status == "warning") ? "&#9888;" : "&#10007;";
+        h.raw("<div class=\"dash-check dash-check-").raw(v).raw("\" title=\"")
+         .text(c.name).raw(": ").text(c.detail).raw("\">");
+        h.raw("<span class=\"dash-check-icon\">").raw(icon).raw("</span>");
+        h.raw("<span class=\"dash-check-name\">").text(c.name).raw("</span>");
+        h.raw("<span class=\"dash-check-val\">").text(c.value).raw("</span>");
+        if (!c.fix_action.empty() && c.status != "ok") {
+            h.raw("<button class=\"dash-fix-btn\" "
+                  "hx-post=\"/dashboard/fix\" "
+                  "hx-vals='{\"action\":\"").raw(c.fix_action).raw("\"}' "
+                  "hx-target=\"#dash-health\" hx-swap=\"innerHTML\" "
+                  "hx-confirm=\"").text(c.fix_label).raw(" — are you sure?\">"
+                  ).text(c.fix_label).raw("</button>");
         }
         h.raw("</div>");
     }

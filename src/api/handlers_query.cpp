@@ -396,6 +396,73 @@ auto ExplainExecHandler::handle(Request& req, AppContext& ctx) -> Response {
 
     h.raw("<div style=\"padding:var(--sp-4)\"><div class=\"explain-plan\">").text(result->plan_text).raw("</div></div>");
 
+    // ── Index hints: detect Seq Scan on tables with filter conditions ──
+    auto& plan = result->plan_text;
+    std::vector<std::pair<std::string, std::string>> hints; // {table, filter_col}
+
+    // Parse: "Seq Scan on table_name" + "Filter: (col = ...)" patterns
+    std::size_t pos = 0;
+    while ((pos = plan.find("Seq Scan on ", pos)) != std::string::npos) {
+        pos += 12;
+        auto end = plan.find_first_of(" \n(", pos);
+        if (end == std::string::npos) break;
+        auto table = plan.substr(pos, end - pos);
+
+        // Look for "rows=" to check if it's a large scan
+        auto rows_pos = plan.find("rows=", pos);
+        auto next_node = plan.find("->", pos);
+        long long rows = 0;
+        if (rows_pos != std::string::npos && (next_node == std::string::npos || rows_pos < next_node)) {
+            try { rows = std::stoll(plan.substr(rows_pos + 5)); } catch (...) {}
+        }
+
+        // Look for Filter condition
+        auto filter_pos = plan.find("Filter:", pos);
+        if (filter_pos != std::string::npos && (next_node == std::string::npos || filter_pos < next_node)) {
+            // Extract column name from filter: (col_name = ...)
+            auto paren = plan.find('(', filter_pos);
+            if (paren != std::string::npos) {
+                auto col_end = plan.find_first_of(" =<>!", paren + 1);
+                if (col_end != std::string::npos) {
+                    auto col = plan.substr(paren + 1, col_end - paren - 1);
+                    // Strip quotes and type casts
+                    if (!col.empty() && col[0] == '(') col = col.substr(1);
+                    auto cast = col.find("::");
+                    if (cast != std::string::npos) col = col.substr(0, cast);
+
+                    if (rows > 100 && !col.empty() && col.find(' ') == std::string::npos) {
+                        hints.push_back({table, col});
+                    }
+                }
+            }
+        } else if (rows > 1000) {
+            // Large seq scan without filter — still worth noting
+            hints.push_back({table, ""});
+        }
+    }
+
+    if (!hints.empty()) {
+        h.raw("<div class=\"explain-hints\">");
+        h.raw("<div class=\"explain-hints-header\">&#128161; Index Suggestions</div>");
+        for (auto& [tbl, col] : hints) {
+            h.raw("<div class=\"explain-hint-item\">");
+            if (col.empty()) {
+                h.raw("<span class=\"explain-hint-text\">Sequential scan on <strong>").text(tbl)
+                 .raw("</strong> — consider adding an index if this table is queried with WHERE conditions</span>");
+            } else {
+                auto idx_name = tbl + "_" + col + "_idx";
+                auto create_sql = "CREATE INDEX CONCURRENTLY " + idx_name + " ON " + tbl + " (" + col + ");";
+                h.raw("<span class=\"explain-hint-text\">Sequential scan on <strong>").text(tbl)
+                 .raw("</strong> filtered by <code>").text(col).raw("</code></span>");
+                h.raw("<button class=\"btn btn-sm btn-ghost\" onclick=\"navigator.clipboard.writeText('")
+                 .raw(create_sql).raw("'); this.textContent='Copied!'\" title=\"").text(create_sql)
+                 .raw("\">Copy CREATE INDEX</button>");
+            }
+            h.raw("</div>");
+        }
+        h.raw("</div>");
+    }
+
     return Response::html(std::move(h).finish());
 }
 

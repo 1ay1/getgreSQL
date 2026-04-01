@@ -185,6 +185,67 @@ struct EditorCSS {
     box-shadow: var(--shadow);
 }
 
+/* ─── Table Hover Preview ─────────────────────────────────────────────── */
+
+.editor-table-preview {
+    position: fixed;
+    z-index: 10002;
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+    min-width: 220px;
+    max-width: 360px;
+    font-size: var(--font-size-xs);
+    animation: etp-in 0.15s ease-out;
+    pointer-events: none;
+}
+@keyframes etp-in {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+.etp-header {
+    padding: var(--sp-2) var(--sp-3);
+    border-bottom: 1px solid var(--border-subtle);
+    font-family: var(--font-mono);
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+}
+.etp-schema { color: var(--text-3); }
+.etp-header strong { color: var(--accent); }
+.etp-type {
+    margin-left: auto;
+    color: var(--text-4);
+    font-size: 0.65rem;
+    text-transform: uppercase;
+}
+.etp-cols {
+    padding: var(--sp-2) var(--sp-3);
+    max-height: 200px;
+    overflow-y: auto;
+}
+.etp-col {
+    display: flex;
+    justify-content: space-between;
+    padding: 1px 0;
+    font-family: var(--font-mono);
+    gap: var(--sp-3);
+}
+.etp-col-name { color: var(--text-1); }
+.etp-col-type { color: var(--text-3); text-align: right; }
+.etp-more {
+    color: var(--text-4);
+    font-style: italic;
+    padding-top: var(--sp-1);
+}
+.etp-hint {
+    padding: var(--sp-1) var(--sp-3);
+    border-top: 1px solid var(--border-subtle);
+    color: var(--text-4);
+    font-size: 0.6rem;
+}
+
 /* Breadcrumbs: co-located in breadcrumbs.hpp */
 /* Alerts: co-located in alert.hpp */
 
@@ -330,6 +391,41 @@ struct EditorCSS {
     color: var(--text-2);
 }
 .explain-timing strong { color: var(--text-0); }
+
+/* ─── Index Suggestion Hints ─────────────────────────────────────────── */
+
+.explain-hints {
+    margin: var(--sp-3) var(--sp-4);
+    border: 1px solid rgba(210, 153, 34, 0.3);
+    border-radius: var(--radius-lg);
+    background: rgba(210, 153, 34, 0.05);
+    overflow: hidden;
+}
+.explain-hints-header {
+    padding: var(--sp-2) var(--sp-3);
+    font-weight: 700;
+    font-size: var(--font-size-xs);
+    color: var(--warning);
+    background: rgba(210, 153, 34, 0.08);
+    border-bottom: 1px solid rgba(210, 153, 34, 0.15);
+}
+.explain-hint-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-3);
+    padding: var(--sp-2) var(--sp-3);
+    font-size: var(--font-size-xs);
+    border-bottom: 1px solid rgba(210, 153, 34, 0.08);
+}
+.explain-hint-item:last-child { border-bottom: none; }
+.explain-hint-text { color: var(--text-1); }
+.explain-hint-text code {
+    color: var(--accent);
+    background: var(--bg-2);
+    padding: 1px 4px;
+    border-radius: 2px;
+}
 
 /* ─── Function source ─────────────────────────────────────────────────── */
 
@@ -3277,6 +3373,13 @@ SQLEditorInstance.prototype.bindEvents = function() {
             return;
         }
 
+        // F12 -> jump to table definition
+        if (e.key === 'F12') {
+            e.preventDefault();
+            self.jumpToTable();
+            return;
+        }
+
         // Ctrl+F -> find
         if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
             e.preventDefault();
@@ -3524,6 +3627,23 @@ SQLEditorInstance.prototype.bindEvents = function() {
         document.body.style.cursor = '';
         document.body.style.userSelect = '';
         self.resizeHandle.classList.remove('dragging');
+    });
+
+    // Ctrl+Click → jump to table
+    this.highlightPre.addEventListener('click', function(e) {
+        if (e.ctrlKey || e.metaKey) {
+            self.jumpToTable();
+        }
+    });
+
+    // Hover preview
+    this._initHoverPreview();
+
+    // Validate on pause (debounced)
+    var validateTimer = null;
+    ta.addEventListener('input', function() {
+        clearTimeout(validateTimer);
+        validateTimer = setTimeout(function() { self.validateSQL(); }, 800);
     });
 
     // ─── File drag & drop ──────────────────────────────────────────────
@@ -4073,6 +4193,202 @@ SQLEditorInstance.prototype.showSavedQueries = function() {
             }
         });
     });
+};
+
+// ─── Jump to Table Definition (Ctrl+Click / F12) ────────────────────
+
+SQLEditorInstance.prototype.jumpToTable = function() {
+    var ta = this.textarea;
+    var word = this._wordAtCursor();
+    if (!word || !this.completionData) return;
+
+    var tables = this.completionData.tables;
+    var match = null;
+
+    // Check for schema.table
+    var dotPos = ta.value.lastIndexOf('.', ta.selectionStart - 1);
+    if (dotPos > 0) {
+        var beforeDot = ta.value.substring(0, dotPos);
+        var schemaWord = beforeDot.match(/(\w+)$/);
+        if (schemaWord) {
+            var schema = schemaWord[1];
+            for (var i = 0; i < tables.length; i++) {
+                if (tables[i].name === word && tables[i].schema === schema) {
+                    match = tables[i]; break;
+                }
+            }
+        }
+    }
+
+    // Plain table name
+    if (!match) {
+        for (var i = 0; i < tables.length; i++) {
+            if (tables[i].name === word) { match = tables[i]; break; }
+        }
+    }
+
+    if (match) {
+        // Navigate to table page
+        var url = '/db/' + encodeURIComponent(match.schema) + '/schemas';
+        // Try to find the current DB name
+        var dbEl = document.getElementById('toolbar-db');
+        var db = dbEl ? dbEl.textContent : 'postgres';
+        url = '/db/' + encodeURIComponent(db) + '/schema/' + encodeURIComponent(match.schema) + '/table/' + encodeURIComponent(match.name);
+        if (window.spaNavigate) spaNavigate(url);
+        else window.location = url;
+    } else {
+        this.updateStatus('No table found: ' + word);
+    }
+};
+
+SQLEditorInstance.prototype._wordAtCursor = function() {
+    var ta = this.textarea;
+    var text = ta.value;
+    var pos = ta.selectionStart;
+    var start = pos, end = pos;
+    while (start > 0 && /\w/.test(text[start - 1])) start--;
+    while (end < text.length && /\w/.test(text[end])) end++;
+    return start < end ? text.substring(start, end) : '';
+};
+
+// ─── Hover Table Preview ─────────────────────────────────────────────
+
+SQLEditorInstance.prototype._initHoverPreview = function() {
+    var self = this;
+    var hoverTimer = null;
+    var previewEl = null;
+
+    this.highlightPre.addEventListener('mousemove', function(e) {
+        clearTimeout(hoverTimer);
+        if (previewEl) { previewEl.remove(); previewEl = null; }
+
+        hoverTimer = setTimeout(function() {
+            if (!self.completionData) return;
+            var word = self._wordFromMouseEvent(e);
+            if (!word) return;
+
+            // Find table in completions
+            var tables = self.completionData.tables;
+            var match = null;
+            for (var i = 0; i < tables.length; i++) {
+                if (tables[i].name === word) { match = tables[i]; break; }
+            }
+            if (!match || !match.columns || match.columns.length === 0) return;
+
+            // Build preview tooltip
+            previewEl = document.createElement('div');
+            previewEl.className = 'editor-table-preview';
+            var html = '<div class="etp-header"><span class="etp-schema">' + esc(match.schema) + '.</span>' +
+                '<strong>' + esc(match.name) + '</strong>' +
+                '<span class="etp-type">' + esc(match.type || 'table') + '</span></div>';
+            html += '<div class="etp-cols">';
+            var maxCols = Math.min(match.columns.length, 12);
+            for (var c = 0; c < maxCols; c++) {
+                var col = match.columns[c];
+                html += '<div class="etp-col"><span class="etp-col-name">' + esc(col.name) + '</span>' +
+                    '<span class="etp-col-type">' + esc(col.type) + '</span></div>';
+            }
+            if (match.columns.length > maxCols) {
+                html += '<div class="etp-more">+ ' + (match.columns.length - maxCols) + ' more columns</div>';
+            }
+            html += '</div>';
+            html += '<div class="etp-hint">Ctrl+Click to open &middot; F12</div>';
+            previewEl.innerHTML = html;
+            previewEl.style.left = e.clientX + 'px';
+            previewEl.style.top = (e.clientY + 20) + 'px';
+            document.body.appendChild(previewEl);
+
+            // Keep on screen
+            var rect = previewEl.getBoundingClientRect();
+            if (rect.right > window.innerWidth) previewEl.style.left = (window.innerWidth - rect.width - 8) + 'px';
+            if (rect.bottom > window.innerHeight) previewEl.style.top = (e.clientY - rect.height - 8) + 'px';
+        }, 600);
+    });
+
+    this.highlightPre.addEventListener('mouseleave', function() {
+        clearTimeout(hoverTimer);
+        if (previewEl) { previewEl.remove(); previewEl = null; }
+    });
+};
+
+SQLEditorInstance.prototype._wordFromMouseEvent = function(e) {
+    // Approximate: get character position from mouse coordinates
+    // This uses the highlight overlay which has the same layout as the textarea
+    var rect = this.highlightPre.getBoundingClientRect();
+    var x = e.clientX - rect.left + this.highlightPre.scrollLeft;
+    var y = e.clientY - rect.top + this.highlightPre.scrollTop;
+
+    var lineH = parseFloat(getComputedStyle(this.textarea).lineHeight) || 22;
+    var padTop = parseFloat(getComputedStyle(this.textarea).paddingTop) || 12;
+    var padLeft = parseFloat(getComputedStyle(this.textarea).paddingLeft) || 12;
+
+    var lineIdx = Math.floor((y - padTop) / lineH);
+    var lines = this.textarea.value.split('\n');
+    if (lineIdx < 0 || lineIdx >= lines.length) return '';
+
+    var line = lines[lineIdx];
+    // Estimate character position (monospace)
+    if (!this._charWidth) {
+        var sp = document.createElement('span');
+        sp.style.cssText = 'position:absolute;visibility:hidden;font-family:' + getComputedStyle(this.textarea).fontFamily + ';font-size:' + getComputedStyle(this.textarea).fontSize;
+        sp.textContent = 'x';
+        document.body.appendChild(sp);
+        this._charWidth = sp.getBoundingClientRect().width;
+        document.body.removeChild(sp);
+    }
+    var charIdx = Math.round((x - padLeft) / this._charWidth);
+    if (charIdx < 0 || charIdx >= line.length) return '';
+
+    // Extract word at position
+    var start = charIdx, end = charIdx;
+    while (start > 0 && /\w/.test(line[start - 1])) start--;
+    while (end < line.length && /\w/.test(line[end])) end++;
+    return start < end ? line.substring(start, end) : '';
+};
+
+// ─── Inline Validation (underline unknown identifiers) ───────────────
+
+SQLEditorInstance.prototype.validateSQL = function() {
+    if (!this.completionData || !this.completionData.tables) return;
+    // Collect known names
+    var known = {};
+    this.completionData.tables.forEach(function(t) {
+        known[t.name.toLowerCase()] = true;
+        known[(t.schema + '.' + t.name).toLowerCase()] = true;
+        (t.columns || []).forEach(function(c) { known[c.name.toLowerCase()] = true; });
+    });
+    (this.completionData.schemas || []).forEach(function(s) { known[s.toLowerCase()] = true; });
+    KEYWORDS.forEach(function(k) { known[k] = true; });
+    BUILTINS.forEach(function(b) { known[b] = true; });
+    TYPES.forEach(function(t) { known[t] = true; });
+
+    // Find identifiers after FROM, JOIN, INTO, UPDATE, TABLE that are not in known set
+    var text = this.textarea.value;
+    var warnings = [];
+    var contextRe = /\b(?:FROM|JOIN|INTO|UPDATE|TABLE)\s+(\w+(?:\.\w+)?)/gi;
+    var m;
+    while ((m = contextRe.exec(text)) !== null) {
+        var ident = m[1];
+        if (!known[ident.toLowerCase()]) {
+            warnings.push({ start: m.index + m[0].length - ident.length, end: m.index + m[0].length, text: ident });
+        }
+    }
+    this._validationWarnings = warnings;
+};
+
+// ─── Auto-Semicolon ──────────────────────────────────────────────────
+
+SQLEditorInstance.prototype._autoSemicolon = function() {
+    var ta = this.textarea;
+    var text = ta.value.trim();
+    if (!text) return text;
+    // Only add semicolons for single statements that don't end with one
+    if (text.indexOf(';') !== -1) return ta.value; // has semicolons, don't touch
+    var stmts = this.splitStatements(text);
+    if (stmts.length === 1 && !text.endsWith(';')) {
+        return text + ';';
+    }
+    return ta.value;
 };
 
 // ─── Public API ──────────────────────────────────────────────────────

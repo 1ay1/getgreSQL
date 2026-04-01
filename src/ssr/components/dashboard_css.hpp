@@ -104,6 +104,43 @@ struct DashboardCSS {
 .dash-check-name { color: var(--text-2); }
 .dash-check-val { color: var(--text-0); font-weight: 600; }
 
+.dash-fix-btn {
+    border: none;
+    background: rgba(255, 255, 255, 0.08);
+    color: inherit;
+    font-size: var(--font-size-xs);
+    font-family: var(--font-mono);
+    padding: 2px 8px;
+    border-radius: 3px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: background 0.15s;
+    margin-left: auto;
+    white-space: nowrap;
+}
+.dash-fix-btn:hover { background: rgba(255, 255, 255, 0.18); }
+
+.dash-check-warning .dash-fix-btn { color: var(--warning); background: rgba(210, 153, 34, 0.1); }
+.dash-check-warning .dash-fix-btn:hover { background: rgba(210, 153, 34, 0.2); }
+.dash-check-danger .dash-fix-btn { color: var(--danger); background: rgba(248, 81, 73, 0.1); }
+.dash-check-danger .dash-fix-btn:hover { background: rgba(248, 81, 73, 0.2); }
+
+.dash-fix-toast {
+    padding: var(--sp-3) var(--sp-4);
+    background: var(--success-subtle);
+    border: 1px solid rgba(63, 185, 80, 0.3);
+    border-radius: var(--radius);
+    color: var(--success);
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    margin-bottom: var(--sp-3);
+    animation: dash-fix-toast-in 0.3s ease-out;
+}
+@keyframes dash-fix-toast-in {
+    from { opacity: 0; transform: translateY(-8px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
 /* ─── Dashboard Layout ──────────────────────────────────────────────── */
 
 .dash-row {

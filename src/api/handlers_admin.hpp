@@ -26,6 +26,26 @@ struct SettingsSearchHandler {
     static auto handle(Request& req, AppContext& ctx) -> Response;
 };
 
+// POST /settings/reload — call pg_reload_conf()
+struct SettingsReloadHandler {
+    static auto handle(Request& req, AppContext& ctx) -> Response;
+};
+
+// GET /admin/unused-indexes — unused index manager
+struct UnusedIndexesHandler {
+    static auto handle(Request& req, AppContext& ctx) -> Response;
+};
+
+// POST /admin/drop-index — drop a specific index
+struct DropIndexHandler {
+    static auto handle(Request& req, AppContext& ctx) -> Response;
+};
+
+// GET /admin/permissions — permission audit view
+struct PermissionsHandler {
+    static auto handle(Request& req, AppContext& ctx) -> Response;
+};
+
 // GET /db/{db}/schema/{schema}/functions — list functions
 struct FunctionListHandler {
     static auto handle(Request& req, AppContext& ctx) -> Response;
