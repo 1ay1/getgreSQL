@@ -254,65 +254,99 @@
     font-size: var(--font-size-xs);
 }
 
-/* DataView table */
-.dv-table { border-collapse: collapse; width: 100%; table-layout: fixed; }
+/* ── DataView table — spreadsheet-style data grid ──────────────────── */
+/* Design: auto-width columns, horizontal scroll, frozen # + actions.  */
+/* No table-layout:fixed — columns size to content naturally.          */
+
+.dv-table {
+    border-collapse: separate;
+    border-spacing: 0;
+    width: max-content;       /* table grows to fit content, scrolls */
+    min-width: 100%;          /* but never narrower than container    */
+}
 .dv-table td {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    max-width: 320px;         /* cap so one huge column doesn't dominate */
+    min-width: 60px;          /* floor so columns stay readable          */
     border-right: 1px solid var(--border-subtle);
+    border-bottom: 1px solid var(--border-subtle);
     height: 32px;
+    padding: 0 var(--sp-3);
+    font-size: var(--font-size-xs);
 }
 .dv-table th {
     border-right: 1px solid var(--border-subtle);
-    height: 30px;
-    position: relative;
+    border-bottom: 1px solid var(--border);
+    height: 32px;
+    padding: 0 var(--sp-3);
+    position: sticky;
+    top: 0;
+    z-index: 2;
     user-select: none;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    white-space: nowrap;
+    background: var(--bg-2);
+    font-size: var(--font-size-xs);
+    font-weight: 600;
 }
 .dv-table td:last-child, .dv-table th:last-child { border-right: none; }
 
-/* Row number column — fixed width, never overlapped */
+/* Scrollable wrapper needs constrained height for sticky header */
+.data-view .table-wrapper.scrollable {
+    max-height: calc(100vh - 260px);
+    overflow: auto;
+}
+
+/* ── Row number column — frozen left ─────────────────────────────── */
 .dv-table .row-num-header,
 .dv-table td.row-num {
-    width: 48px;
-    min-width: 48px;
-    max-width: 48px;
+    width: 44px;
+    min-width: 44px;
+    max-width: 44px;
     text-align: center;
+    padding: 0;
     position: sticky;
     left: 0;
-    z-index: 2;
+    z-index: 3;
     background: var(--bg-1);
+    border-right: 2px solid var(--border);
 }
 .dv-table thead .row-num-header {
     background: var(--bg-2);
-    z-index: 3;
+    z-index: 4;                /* above both sticky-left and sticky-top */
 }
 
-/* Actions column — sticky right, always visible */
+/* ── Actions column — frozen right ───────────────────────────────── */
 .dv-table .dv-actions-header,
 .dv-table td.dv-actions {
-    width: 48px;
-    min-width: 48px;
-    max-width: 48px;
+    width: 44px;
+    min-width: 44px;
+    max-width: 44px;
     text-align: center;
+    padding: 0;
     position: sticky;
     right: 0;
-    z-index: 2;
+    z-index: 3;
     background: var(--bg-1);
-    border-left: 1px solid var(--border-subtle);
+    border-left: 2px solid var(--border);
     border-right: none;
 }
 .dv-table thead .dv-actions-header {
     background: var(--bg-2);
-    z-index: 3;
+    z-index: 4;
 }
-/* Hover state preserves background on sticky cells */
+
+/* Preserve background on sticky cells during hover */
 .dv-table tbody tr:hover td.row-num,
 .dv-table tbody tr:hover td.dv-actions {
     background: var(--bg-2);
 }
+/* Zebra striping for data rows */
+.dv-table tbody tr:nth-child(even) td { background: rgba(255,255,255,0.015); }
+.dv-table tbody tr:nth-child(even) td.row-num,
+.dv-table tbody tr:nth-child(even) td.dv-actions { background: color-mix(in srgb, var(--bg-1) 97%, white); }
+.dv-table tbody tr:hover td { background: rgba(56,139,253,0.06); }
 
 /* Sort indicators */
 .dv-table th.sortable { cursor: pointer; }

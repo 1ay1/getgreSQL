@@ -463,11 +463,75 @@ document.addEventListener('keydown', function(e) {
 
 // ─── Auto-init on DOM changes (htmx swaps) ──────────────────────────
 
+// ─── Auto-size columns based on content ──────────────────────────────
+// Samples header + first N rows, measures text, sets col widths.
+// This is how pgAdmin/DBeaver get good default widths.
+
+function autoSizeColumns(dv) {
+    var table = getTable(dv);
+    if (!table || !table.tHead) return;
+    var headers = getHeaderCells(table);
+    var rows = getBodyRows(table);
+    if (headers.length === 0) return;
+
+    // Create offscreen measurer
+    var ruler = document.createElement('span');
+    ruler.style.cssText = 'position:absolute;visibility:hidden;white-space:nowrap;font:inherit;padding:0 12px;';
+    document.body.appendChild(ruler);
+
+    // Copy font from a cell
+    var sampleCell = table.querySelector('td');
+    if (sampleCell) {
+        var cs = getComputedStyle(sampleCell);
+        ruler.style.fontFamily = cs.fontFamily;
+        ruler.style.fontSize = cs.fontSize;
+    }
+
+    var widths = [];
+    var MIN_W = 64, MAX_W = 360, HEADER_PAD = 40; // pad for sort icon + resize handle
+
+    headers.forEach(function(th, colIdx) {
+        // Skip frozen columns — they have explicit widths
+        if (th.classList.contains('row-num-header') || th.classList.contains('dv-actions-header')) {
+            widths.push(0); // 0 = skip
+            return;
+        }
+
+        // Measure header text
+        var headerText = th.querySelector('.dv-th-text');
+        ruler.textContent = headerText ? headerText.textContent : th.textContent.trim();
+        var hw = ruler.offsetWidth + HEADER_PAD;
+
+        // Sample up to 20 rows for content width
+        var maxContent = 0;
+        var sampleCount = Math.min(rows.length, 20);
+        for (var r = 0; r < sampleCount; r++) {
+            var cell = rows[r].cells[colIdx];
+            if (!cell) continue;
+            ruler.textContent = cellText(cell);
+            if (ruler.offsetWidth > maxContent) maxContent = ruler.offsetWidth;
+        }
+
+        var w = Math.max(hw, maxContent + 8);
+        w = Math.max(MIN_W, Math.min(MAX_W, w));
+        widths.push(w);
+    });
+
+    document.body.removeChild(ruler);
+
+    // Apply widths
+    headers.forEach(function(th, i) {
+        if (widths[i] === 0) return;
+        th.style.width = widths[i] + 'px';
+    });
+}
+
 function initDataViews() {
     document.querySelectorAll('.data-view').forEach(function(dv) {
         if (dv._dvInit) return;
         dv._dvInit = true;
         initColumnResize(dv);
+        autoSizeColumns(dv);
     });
 }
 
