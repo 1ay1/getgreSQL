@@ -20,6 +20,12 @@ struct DashboardStatsHandler {
 struct DashboardContentHandler {
     static auto handle(Request& req, AppContext& ctx) -> Response;
 };
+struct DashboardActivityHandler {
+    static auto handle(Request& req, AppContext& ctx) -> Response;
+};
+struct DashboardTopTablesHandler {
+    static auto handle(Request& req, AppContext& ctx) -> Response;
+};
 
 struct DatabaseListHandler {
     static auto handle(Request& req, AppContext& ctx) -> Response;

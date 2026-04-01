@@ -59,12 +59,20 @@ static auto json_escape_str(std::string_view s) -> std::string {
 
 auto IndexHandler::handle(Request& req, AppContext& /*ctx*/) -> Response {
     using namespace ssr;
-    auto page = Page("Dashboard", "Dashboard")
-        .section("dash-health",  "/dashboard/health",  "Checking health...")
-        .section("dash-stats",   "/dashboard/stats",   "Loading stats...")
-        .section("dash-content", "/dashboard/content",  "");
-    if (req.is_htmx()) return Response::html(page.render_partial());
-    return Response::html(page.render());
+    auto render = [](Html& h) {
+        // Health + stats: full width stacking
+        h.raw("<div id=\"dash-health\" hx-get=\"/dashboard/health\" hx-trigger=\"load\" hx-swap=\"innerHTML\"></div>\n");
+        h.raw("<div id=\"dash-stats\" hx-get=\"/dashboard/stats\" hx-trigger=\"load\" hx-swap=\"innerHTML\"></div>\n");
+        // Two-column row: activity + top tables
+        h.raw("<div class=\"dash-row\">\n");
+        h.raw("  <div id=\"dash-activity\" hx-get=\"/dashboard/activity\" hx-trigger=\"load\" hx-swap=\"innerHTML\"></div>\n");
+        h.raw("  <div id=\"dash-top-tables\" hx-get=\"/dashboard/top-tables\" hx-trigger=\"load\" hx-swap=\"innerHTML\"></div>\n");
+        h.raw("</div>\n");
+        // Two-column row: databases + activity by db
+        h.raw("<div id=\"dash-content\" hx-get=\"/dashboard/content\" hx-trigger=\"load\" hx-swap=\"innerHTML\"></div>\n");
+    };
+    if (req.is_htmx()) return Response::html(render_partial(render));
+    return Response::html(render_page("Dashboard", "Dashboard", render));
 }
 
 auto DashboardHealthHandler::handle(Request& /*req*/, AppContext& ctx) -> Response {
@@ -74,10 +82,35 @@ auto DashboardHealthHandler::handle(Request& /*req*/, AppContext& ctx) -> Respon
     return Response::html(cache().get_or_compute("dashboard:health", std::chrono::seconds(5), [&] {
         auto checks = pg::health_checks(conn->get());
         if (!checks) return render_to_string<Alert>(Alert::Props{error_message(checks.error()), "error"});
-        auto h = Html::with_capacity(2048);
-        h.raw("<div class=\"health-grid\">");
-        for (auto& c : *checks) HealthCard::render({c.name, c.status, c.value, c.detail}, h);
+        auto h = Html::with_capacity(4096);
+        // Status ribbon — compact, glanceable
+        int ok_count = 0, warn_count = 0, crit_count = 0;
+        for (auto& c : *checks) {
+            if (c.status == "ok") ok_count++;
+            else if (c.status == "warning") warn_count++;
+            else crit_count++;
+        }
+        auto overall = crit_count > 0 ? "critical" : warn_count > 0 ? "degraded" : "healthy";
+        auto overall_cls = crit_count > 0 ? "danger" : warn_count > 0 ? "warning" : "success";
+        h.raw("<div class=\"dash-hero\">");
+        h.raw("<div class=\"dash-hero-status dash-hero-").raw(overall_cls).raw("\">");
+        h.raw("<div class=\"dash-hero-pulse\"></div>");
+        h.raw("<span class=\"dash-hero-dot\"></span>");
+        h.raw("<span class=\"dash-hero-label\">System ").raw(overall).raw("</span>");
         h.raw("</div>");
+        // Mini check indicators
+        h.raw("<div class=\"dash-checks\">");
+        for (auto& c : *checks) {
+            auto v = (c.status == "ok") ? "success" : (c.status == "warning") ? "warning" : "danger";
+            auto icon = (c.status == "ok") ? "&#10003;" : (c.status == "warning") ? "&#9888;" : "&#10007;";
+            h.raw("<div class=\"dash-check dash-check-").raw(v).raw("\" title=\"")
+             .text(c.name).raw(": ").text(c.detail).raw("\">");
+            h.raw("<span class=\"dash-check-icon\">").raw(icon).raw("</span>");
+            h.raw("<span class=\"dash-check-name\">").text(c.name).raw("</span>");
+            h.raw("<span class=\"dash-check-val\">").text(c.value).raw("</span>");
+            h.raw("</div>");
+        }
+        h.raw("</div></div>");
         return std::move(h).finish();
     }));
 }
@@ -88,18 +121,106 @@ auto DashboardStatsHandler::handle(Request& /*req*/, AppContext& ctx) -> Respons
     if (!conn) return Response::html(render_to_string<Alert>(Alert::Props{error_message(conn.error()), "error"}));
     auto stats = pg::server_stats(conn->get());
     if (!stats) return Response::html(render_to_string<Alert>(Alert::Props{error_message(stats.error()), "error"}));
-    auto h = Html::with_capacity(2048);
+    auto h = Html::with_capacity(8192);
     auto& s = *stats;
-    h.raw("<div class=\"stat-grid\">");
-    StatCard::render({"Active", std::to_string(s.active_connections)}, h);
-    StatCard::render({"Idle", std::to_string(s.idle_connections)}, h);
-    StatCard::render({"Idle in Txn", std::to_string(s.idle_in_transaction), s.idle_in_transaction > 0 ? "warning" : ""}, h);
-    StatCard::render({"Cache Hit", std::format("{:.1f}%", s.cache_hit_ratio * 100), s.cache_hit_ratio < 0.90 ? "danger" : "success"}, h);
-    StatCard::render({"Commits", std::to_string(s.total_commits)}, h);
-    StatCard::render({"Rollbacks", std::to_string(s.total_rollbacks), s.total_rollbacks > 0 ? "warning" : ""}, h);
-    StatCard::render({"Max Connections", std::to_string(s.max_connections)}, h);
-    StatCard::render({"Uptime", s.uptime, "accent"}, h);
-    h.raw("</div><div class=\"server-info\"><code>").text(s.version).raw("</code></div>");
+
+    // Clean uptime: strip fractional seconds
+    auto uptime_clean = s.uptime;
+    if (auto dot = uptime_clean.find('.'); dot != std::string::npos) uptime_clean = uptime_clean.substr(0, dot);
+
+    // Server hero bar
+    h.raw("<div class=\"dash-server\">");
+    h.raw("<div class=\"dash-server-info\">");
+    h.raw("<span class=\"dash-server-version\">").text(s.version).raw("</span>");
+    h.raw("<span class=\"dash-server-uptime\">&#9716; <strong>").text(uptime_clean).raw("</strong></span>");
+    h.raw("<span class=\"dash-server-pid\">PID ").raw(std::to_string(s.pid)).raw("</span>");
+    h.raw("</div>");
+    h.raw("<div class=\"dash-server-actions\">");
+    h.raw("<a href=\"/query\" class=\"btn btn-sm btn-ghost\" data-spa>&#9654; Query</a>");
+    h.raw("<a href=\"/monitor\" class=\"btn btn-sm btn-ghost\" data-spa>&#9673; Monitor</a>");
+    h.raw("<a href=\"/settings\" class=\"btn btn-sm btn-ghost\" data-spa>&#9881; Settings</a>");
+    h.raw("</div></div>");
+
+    // Big metric cards row
+    h.raw("<div class=\"dash-metrics\">");
+
+    // Connection gauge (SVG ring)
+    auto total_conns = s.active_connections + s.idle_connections + s.idle_in_transaction;
+    auto conn_pct = s.max_connections > 0 ? static_cast<double>(total_conns) / s.max_connections * 100.0 : 0.0;
+    auto conn_cls = conn_pct >= 90 ? "danger" : conn_pct >= 70 ? "warning" : "success";
+    h.raw("<div class=\"dash-metric-card\">");
+    h.raw("<div class=\"dash-ring-container\">");
+    h.raw(std::format(
+        "<svg class=\"dash-ring\" viewBox=\"0 0 120 120\">"
+        "<circle cx=\"60\" cy=\"60\" r=\"52\" fill=\"none\" stroke=\"var(--bg-3)\" stroke-width=\"8\"/>"
+        "<circle cx=\"60\" cy=\"60\" r=\"52\" fill=\"none\" stroke=\"var(--{})\" stroke-width=\"8\" "
+        "stroke-dasharray=\"{:.1f} {:.1f}\" stroke-dashoffset=\"81.7\" stroke-linecap=\"round\" "
+        "class=\"dash-ring-fill\"/></svg>",
+        conn_cls, conn_pct * 3.267, (100.0 - conn_pct) * 3.267
+    ));
+    h.raw("<div class=\"dash-ring-label\">");
+    h.raw("<span class=\"dash-ring-value\">").raw(std::to_string(total_conns)).raw("</span>");
+    h.raw("<span class=\"dash-ring-sub\">/ ").raw(std::to_string(s.max_connections)).raw("</span>");
+    h.raw("</div></div>");
+    h.raw("<div class=\"dash-metric-title\">Connections</div>");
+    h.raw("<div class=\"dash-metric-breakdown\">");
+    h.raw("<span class=\"dash-metric-item\"><span class=\"dash-dot dash-dot-active\"></span>Active ").raw(std::to_string(s.active_connections)).raw("</span>");
+    h.raw("<span class=\"dash-metric-item\"><span class=\"dash-dot dash-dot-idle\"></span>Idle ").raw(std::to_string(s.idle_connections)).raw("</span>");
+    if (s.idle_in_transaction > 0) {
+        h.raw("<span class=\"dash-metric-item dash-metric-warn\"><span class=\"dash-dot dash-dot-warning\"></span>Idle Txn ").raw(std::to_string(s.idle_in_transaction)).raw("</span>");
+    }
+    h.raw("</div></div>");
+
+    // Cache hit ratio (SVG ring)
+    auto cache_pct = s.cache_hit_ratio * 100.0;
+    auto cache_cls = cache_pct < 90 ? "danger" : cache_pct < 99 ? "warning" : "success";
+    h.raw("<div class=\"dash-metric-card\">");
+    h.raw("<div class=\"dash-ring-container\">");
+    h.raw(std::format(
+        "<svg class=\"dash-ring\" viewBox=\"0 0 120 120\">"
+        "<circle cx=\"60\" cy=\"60\" r=\"52\" fill=\"none\" stroke=\"var(--bg-3)\" stroke-width=\"8\"/>"
+        "<circle cx=\"60\" cy=\"60\" r=\"52\" fill=\"none\" stroke=\"var(--{})\" stroke-width=\"8\" "
+        "stroke-dasharray=\"{:.1f} {:.1f}\" stroke-dashoffset=\"81.7\" stroke-linecap=\"round\" "
+        "class=\"dash-ring-fill\"/></svg>",
+        cache_cls, cache_pct * 3.267, (100.0 - cache_pct) * 3.267
+    ));
+    h.raw("<div class=\"dash-ring-label\">");
+    h.raw(std::format("<span class=\"dash-ring-value\">{:.1f}%</span>", cache_pct));
+    h.raw("</div></div>");
+    h.raw("<div class=\"dash-metric-title\">Cache Hit Ratio</div>");
+    h.raw("<div class=\"dash-metric-breakdown\">");
+    auto total_blocks = s.blocks_hit + s.blocks_read;
+    if (total_blocks > 0) {
+        h.raw("<span class=\"dash-metric-item\">Hit ").raw(std::to_string(s.blocks_hit)).raw("</span>");
+        h.raw("<span class=\"dash-metric-item\">Read ").raw(std::to_string(s.blocks_read)).raw("</span>");
+    }
+    h.raw("</div></div>");
+
+    // Transaction throughput
+    auto total_txn = s.total_commits + s.total_rollbacks;
+    auto rollback_pct = total_txn > 0 ? static_cast<double>(s.total_rollbacks) / total_txn * 100.0 : 0.0;
+    h.raw("<div class=\"dash-metric-card\">");
+    h.raw("<div class=\"dash-metric-big\">");
+    h.raw("<span class=\"dash-big-num\">");
+    // Format with K/M suffix
+    if (s.total_commits >= 1000000) h.raw(std::format("{:.1f}M", s.total_commits / 1000000.0));
+    else if (s.total_commits >= 1000) h.raw(std::format("{:.1f}K", s.total_commits / 1000.0));
+    else h.raw(std::to_string(s.total_commits));
+    h.raw("</span>");
+    h.raw("<span class=\"dash-big-label\">commits</span>");
+    h.raw("</div>");
+    h.raw("<div class=\"dash-metric-title\">Transactions</div>");
+    h.raw("<div class=\"dash-metric-breakdown\">");
+    h.raw("<span class=\"dash-metric-item\">Commits ").raw(std::to_string(s.total_commits)).raw("</span>");
+    if (s.total_rollbacks > 0) {
+        h.raw(std::format("<span class=\"dash-metric-item dash-metric-warn\">Rollbacks {} ({:.1f}%)</span>",
+            s.total_rollbacks, rollback_pct));
+    } else {
+        h.raw("<span class=\"dash-metric-item\">Rollbacks 0</span>");
+    }
+    h.raw("</div></div>");
+
+    h.raw("</div>"); // end dash-metrics
     return Response::html(std::move(h).finish());
 }
 
@@ -108,47 +229,181 @@ auto DashboardContentHandler::handle(Request& /*req*/, AppContext& ctx) -> Respo
     auto conn = ctx.pool.checkout();
     if (!conn) return Response::html(render_to_string<Alert>(Alert::Props{error_message(conn.error()), "error"}));
     auto dbs_res = pg::database_sizes(conn->get());
-    auto activity_res = pg::database_activity(conn->get());
-    auto h = Html::with_capacity(4096);
-    h.raw("<div class=\"dashboard-grid\">");
-    if (dbs_res) {
+    auto h = Html::with_capacity(8192);
+
+    if (dbs_res && !dbs_res->empty()) {
         double max_size = 1.0;
         for (auto& d : *dbs_res) if (static_cast<double>(d.size_bytes) > max_size) max_size = static_cast<double>(d.size_bytes);
-        { auto _ = scope(h, "div", "class=\"dashboard-section\"");
-            h.raw("<div class=\"dashboard-section-header\">Databases</div>");
-            { auto _ = scope(h, "div", "class=\"dashboard-section-body\"");
-                h.raw("<table><thead><tr><th>Name</th><th style=\"text-align:right\">Size</th><th style=\"width:100px\"></th><th>Conn</th><th>Cache</th></tr></thead><tbody>");
-                for (auto& d : *dbs_res) {
-                    auto pct = static_cast<double>(d.size_bytes) / max_size * 100;
-                    auto cv = d.cache_hit_ratio < 0.90 ? "danger" : d.cache_hit_ratio < 0.99 ? "warning" : "success";
-                    h.raw("<tr><td><a href=\"/db/").text(d.name).raw("/schemas\"><strong>").text(d.name).raw("</strong></a></td>");
-                    h.raw("<td class=\"num\" style=\"white-space:nowrap\">").text(d.size).raw("</td>");
-                    h.raw("<td>"); SizeBar::render({pct}, h); h.raw("</td>");
-                    h.raw("<td class=\"num\">").raw(std::to_string(d.connections)).raw("</td>");
-                    h.raw("<td>"); Badge::render({std::format("{:.0f}%", d.cache_hit_ratio * 100), cv}, h); h.raw("</td></tr>");
-                }
-                h.raw("</tbody></table>");
+
+        h.raw("<div class=\"dashboard-section\">");
+        h.raw("<div class=\"dashboard-section-header\">Databases"
+              "<a href=\"/databases\" class=\"btn btn-sm btn-ghost\" data-spa>View All &rsaquo;</a></div>");
+        h.raw("<div class=\"dashboard-section-body\">");
+        h.raw("<div class=\"dash-db-grid\">");
+        for (auto& d : *dbs_res) {
+            auto pct = static_cast<double>(d.size_bytes) / max_size * 100;
+            auto cache_pct = d.cache_hit_ratio * 100.0;
+            auto cache_cls = cache_pct < 90 ? "danger" : cache_pct < 99 ? "warning" : "success";
+
+            h.raw("<a href=\"/db/").text(d.name).raw("/schemas\" class=\"dash-db-card\" data-spa>");
+
+            // Header
+            h.raw("<div class=\"dash-db-header\">");
+            h.raw("<span class=\"dash-db-name\">").text(d.name).raw("</span>");
+            h.raw("<span class=\"dash-db-size\">").text(d.size).raw("</span>");
+            h.raw("</div>");
+
+            // Size bar
+            h.raw(std::format("<div class=\"dash-db-bar\"><div class=\"dash-db-bar-fill\" style=\"width:{:.0f}%\"></div></div>", pct));
+
+            // Stats row
+            h.raw("<div class=\"dash-db-stats\">");
+            h.raw("<span title=\"Connections\"><span class=\"dash-db-stat-icon\">&#9679;</span>").raw(std::to_string(d.connections)).raw(" conn</span>");
+            h.raw("<span title=\"Cache Hit Ratio\" class=\"dash-db-cache-").raw(cache_cls).raw("\">")
+             .raw(std::format("{:.0f}%", cache_pct)).raw(" cache</span>");
+            if (d.xact_commit > 0) {
+                h.raw("<span title=\"Commits\">");
+                if (d.xact_commit >= 1000000) h.raw(std::format("{:.1f}M", d.xact_commit / 1e6));
+                else if (d.xact_commit >= 1000) h.raw(std::format("{:.1f}K", d.xact_commit / 1e3));
+                else h.raw(std::to_string(d.xact_commit));
+                h.raw(" txn</span>");
+            }
+            if (d.deadlocks > 0) {
+                h.raw("<span class=\"dash-db-deadlocks\" title=\"Deadlocks\">").raw(std::to_string(d.deadlocks)).raw(" deadlocks</span>");
+            }
+            h.raw("</div>");
+
+            h.raw("</a>"); // close card
+        }
+        h.raw("</div>"); // close dash-db-grid
+        h.raw("</div></div>"); // close section-body + section
+    }
+
+    return Response::html(std::move(h).finish());
+}
+
+// ─── DashboardActivityHandler — live queries/connections ────────────
+
+auto DashboardActivityHandler::handle(Request& /*req*/, AppContext& ctx) -> Response {
+    using namespace ssr;
+    auto conn = ctx.pool.checkout();
+    if (!conn) return Response::html(render_to_string<Alert>(Alert::Props{error_message(conn.error()), "error"}));
+
+    auto queries = pg::active_queries(conn->get());
+    auto h = Html::with_capacity(4096);
+
+    h.raw("<div class=\"dashboard-section\">");
+    h.raw("<div class=\"dashboard-section-header\">Live Activity"
+          "<a href=\"/monitor\" class=\"btn btn-sm btn-ghost\" data-spa>Monitor &rsaquo;</a></div>");
+    h.raw("<div class=\"dashboard-section-body\">");
+
+    if (!queries || queries->empty()) {
+        h.raw("<div class=\"dash-empty\">No active queries</div>");
+    } else {
+        // Count by state
+        int n_active = 0, n_idle = 0, n_idle_txn = 0;
+        for (auto& q : *queries) {
+            if (q.state == "active") n_active++;
+            else if (q.state == "idle in transaction") n_idle_txn++;
+            else n_idle++;
+        }
+        h.raw("<div class=\"dash-activity-summary\">");
+        h.raw("<span class=\"dash-activity-badge dash-ab-active\">").raw(std::to_string(n_active)).raw(" active</span>");
+        h.raw("<span class=\"dash-activity-badge dash-ab-idle\">").raw(std::to_string(n_idle)).raw(" idle</span>");
+        if (n_idle_txn > 0) h.raw("<span class=\"dash-activity-badge dash-ab-warn\">").raw(std::to_string(n_idle_txn)).raw(" idle txn</span>");
+        h.raw("</div>");
+
+        // Show active (non-idle) queries, skip our own introspection
+        int shown = 0;
+        h.raw("<div class=\"dash-activity-list\">");
+        for (auto& q : *queries) {
+            if (q.state == "idle" || q.query.empty()) continue;
+            // Skip our own dashboard queries
+            if (q.query.find("pg_stat_activity") != std::string::npos && q.query.find("backend_type") != std::string::npos) continue;
+            if (shown >= 8) break;
+            auto state_cls = q.state == "active" ? "active" : q.state == "idle in transaction" ? "warning" : "idle";
+            h.raw("<div class=\"dash-activity-row\">");
+            h.raw("<span class=\"dash-activity-state dash-activity-").raw(state_cls).raw("\">&#9679;</span>");
+            h.raw("<span class=\"dash-activity-db\">").text(q.database).raw("</span>");
+            h.raw("<span class=\"dash-activity-user\">").text(q.user).raw("</span>");
+            if (!q.duration.empty()) {
+                h.raw("<span class=\"dash-activity-duration\">").text(q.duration).raw("</span>");
+            }
+            auto query_preview = q.query.size() > 100 ? q.query.substr(0, 100) + "..." : q.query;
+            h.raw("<span class=\"dash-activity-query\">").text(query_preview).raw("</span>");
+            h.raw("</div>");
+            shown++;
+        }
+        h.raw("</div>");
+        if (shown == 0) h.raw("<div class=\"dash-empty\">All connections idle &#8212; no active queries</div>");
+    }
+    h.raw("</div></div>");
+    return Response::html(std::move(h).finish());
+}
+
+// ─── DashboardTopTablesHandler — biggest tables bar chart ───────────
+
+auto DashboardTopTablesHandler::handle(Request& /*req*/, AppContext& ctx) -> Response {
+    using namespace ssr;
+    auto conn = ctx.pool.checkout();
+    if (!conn) return Response::html(render_to_string<Alert>(Alert::Props{error_message(conn.error()), "error"}));
+
+    // Get top tables by size across all schemas
+    auto result = conn->get().exec(
+        "SELECT schemaname, relname, "
+        "pg_size_pretty(pg_total_relation_size(schemaname||'.'||quote_ident(relname))) as size, "
+        "pg_total_relation_size(schemaname||'.'||quote_ident(relname)) as size_bytes, "
+        "n_live_tup, n_dead_tup, "
+        "coalesce(n_tup_ins + n_tup_upd + n_tup_del, 0) as total_writes, "
+        "CASE WHEN n_live_tup > 0 THEN round(n_dead_tup::numeric / n_live_tup * 100, 1) ELSE 0 END as dead_pct "
+        "FROM pg_stat_user_tables "
+        "ORDER BY pg_total_relation_size(schemaname||'.'||quote_ident(relname)) DESC LIMIT 10"
+    );
+
+    auto h = Html::with_capacity(4096);
+    h.raw("<div class=\"dashboard-section\">");
+    h.raw("<div class=\"dashboard-section-header\">Largest Tables</div>");
+    h.raw("<div class=\"dashboard-section-body\">");
+
+    if (!result || result->row_count() == 0) {
+        h.raw("<div class=\"dash-empty\">No tables found</div>");
+    } else {
+        long long max_bytes = 1;
+        // First pass: find max
+        for (auto row : *result) {
+            if (!row.is_null(3)) {
+                auto val = std::stoll(std::string(row[3]));
+                if (val > max_bytes) max_bytes = val;
             }
         }
-    }
-    if (activity_res) {
-        { auto _ = scope(h, "div", "class=\"dashboard-section\"");
-            h.raw("<div class=\"dashboard-section-header\">Activity by Database</div>");
-            { auto _ = scope(h, "div", "class=\"dashboard-section-body\"");
-                h.raw("<table><thead><tr><th>Database</th><th>Active</th><th>Idle</th><th>Idle Txn</th><th>Commits</th><th>Rollbacks</th></tr></thead><tbody>");
-                for (auto& a : *activity_res) {
-                    h.raw("<tr><td><strong>").text(a.database).raw("</strong></td>");
-                    h.raw("<td class=\"num\">").raw(std::to_string(a.active)).raw("</td>");
-                    h.raw("<td class=\"num\">").raw(std::to_string(a.idle)).raw("</td>");
-                    h.raw("<td class=\"num\">").raw(std::to_string(a.idle_in_transaction)).raw("</td>");
-                    h.raw("<td class=\"num\">").raw(std::to_string(a.xact_commit)).raw("</td>");
-                    h.raw("<td class=\"num\">").raw(std::to_string(a.xact_rollback)).raw("</td></tr>");
-                }
-                h.raw("</tbody></table>");
+        h.raw("<div class=\"dash-bar-chart\">");
+        for (auto row : *result) {
+            auto schema = std::string(row[0]);
+            auto table = std::string(row[1]);
+            auto size = std::string(row[2]);
+            auto size_bytes = row.is_null(3) ? 0LL : std::stoll(std::string(row[3]));
+            auto live = row.is_null(4) ? std::string("0") : std::string(row[4]);
+            auto dead_pct = row.is_null(7) ? 0.0 : std::stod(std::string(row[7]));
+            auto pct = max_bytes > 0 ? static_cast<double>(size_bytes) / max_bytes * 100.0 : 0.0;
+
+            h.raw("<div class=\"dash-bar-row\">");
+            h.raw("<span class=\"dash-bar-name\"><a href=\"/db/postgres/schema/")
+             .text(schema).raw("/table/").text(table).raw("\" data-spa>")
+             .text(schema).raw(".").text(table).raw("</a></span>");
+            h.raw("<div class=\"dash-bar-track\">");
+            h.raw(std::format("<div class=\"dash-bar-fill{}\" style=\"width:{:.1f}%\"></div>",
+                dead_pct > 20 ? " dash-bar-warn" : "", pct));
+            h.raw("</div>");
+            h.raw("<span class=\"dash-bar-value\">").text(size).raw("</span>");
+            h.raw("<span class=\"dash-bar-meta\">").raw(live).raw(" rows");
+            if (dead_pct > 5) {
+                h.raw(std::format(" <span class=\"dash-bar-dead\">{:.0f}% dead</span>", dead_pct));
             }
+            h.raw("</span></div>");
         }
+        h.raw("</div>");
     }
-    h.raw("</div>");
+    h.raw("</div></div>");
     return Response::html(std::move(h).finish());
 }
 

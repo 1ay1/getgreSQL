@@ -1,0 +1,375 @@
+/* ─── Data Browser ────────────────────────────────────────────────────── */
+
+.data-toolbar {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    padding: var(--sp-2) var(--sp-3);
+    background: var(--bg-2);
+    border-bottom: 1px solid var(--border-subtle);
+    font-size: var(--font-size-xs);
+    flex-wrap: wrap;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+.data-info {
+    color: var(--text-2);
+    font-family: var(--font-mono);
+}
+.data-info a { margin: 0 var(--sp-1); }
+
+/* Editable cells */
+.editable-cell {
+    cursor: cell;
+    padding: 1px 2px;
+    border-radius: 2px;
+    transition: background var(--transition-fast), box-shadow var(--transition-fast);
+    position: relative;
+}
+.editable-cell:hover {
+    background: var(--accent-subtle);
+    box-shadow: inset 0 0 0 1px rgba(56, 139, 253, 0.2);
+}
+.editable-cell:hover::after {
+    content: "\270E";
+    position: absolute;
+    top: 0;
+    right: 2px;
+    font-size: 10px;
+    color: var(--text-4);
+    opacity: 0.6;
+    pointer-events: none;
+}
+.editable-cell.cell-updated {
+    background: var(--success-subtle);
+    box-shadow: inset 0 0 0 1px rgba(63, 185, 80, 0.3);
+}
+
+.cell-edit-input {
+    width: 100%;
+    padding: 2px 6px;
+    background: var(--bg-0);
+    border: 2px solid var(--accent);
+    border-radius: var(--radius);
+    color: var(--text-0);
+    font-family: var(--font-mono);
+    font-size: inherit;
+    outline: none;
+    box-shadow: 0 0 0 3px var(--accent-subtle), var(--shadow-md);
+}
+
+/* Insert row form */
+.insert-form {
+    padding: var(--sp-4);
+    background: var(--bg-1);
+    border-bottom: 1px solid var(--border);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+    animation: slide-down 0.2s ease-out;
+}
+
+@keyframes slide-down {
+    from {
+        opacity: 0;
+        transform: translateY(-8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.insert-form-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: var(--sp-3);
+    margin-bottom: var(--sp-3);
+}
+
+.insert-field label {
+    display: block;
+    font-size: var(--font-size-xs);
+    color: var(--text-3);
+    margin-bottom: 2px;
+    font-family: var(--font-mono);
+}
+
+.insert-input {
+    width: 100%;
+    padding: 5px 8px;
+    background: var(--bg-0);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text-0);
+    font-size: var(--font-size-sm);
+    font-family: var(--font-mono);
+    outline: none;
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+.insert-input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-subtle);
+}
+
+.insert-actions {
+    display: flex;
+    gap: var(--sp-2);
+}
+
+/* ─── Cell Edit Modal ─────────────────────────────────────────────────── */
+
+.cell-modal {
+    width: 600px;
+    max-width: 90vw;
+    max-height: 80vh;
+    height: fit-content;
+    align-self: flex-start;
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+}
+
+.cell-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--sp-3) var(--sp-4);
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-2);
+}
+
+.cell-modal-title {
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    color: var(--text-0);
+}
+.cell-modal-title code {
+    color: var(--accent);
+    background: var(--accent-subtle);
+    padding: 1px 6px;
+    border-radius: 3px;
+}
+
+.cell-modal-close {
+    background: none;
+    border: none;
+    color: var(--text-3);
+    font-size: 1.2rem;
+    cursor: pointer;
+    padding: 0 var(--sp-2);
+    border-radius: var(--radius);
+}
+.cell-modal-close:hover { color: var(--text-0); background: var(--bg-3); }
+
+.cell-modal-textarea {
+    min-height: 80px;
+    max-height: 60vh;
+    padding: var(--sp-4);
+    background: var(--bg-0);
+    border: none;
+    color: var(--text-0);
+    font-family: var(--font-mono);
+    font-size: var(--font-size-sm);
+    line-height: 1.6;
+    resize: vertical;
+    outline: none;
+    tab-size: 2;
+    field-sizing: content;
+}
+
+.cell-modal-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--sp-3) var(--sp-4);
+    border-top: 1px solid var(--border);
+    background: var(--bg-2);
+}
+
+.cell-modal-info {
+    font-size: var(--font-size-xs);
+    color: var(--text-3);
+    font-family: var(--font-mono);
+}
+
+/* Long cell values — truncated with visual cue */
+.cell-long {
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    display: inline-block;
+    vertical-align: top;
+    cursor: pointer;
+}
+.cell-long:hover {
+    text-decoration: underline dotted;
+}
+
+
+/* ─── DataView ─────────────────────────────────────────────────────── */
+/* Unified data grid component — used by query results and table browse */
+
+.data-view {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+}
+
+/* DataView toolbar */
+.dv-toolbar {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    padding: var(--sp-2) var(--sp-3);
+    background: var(--bg-2);
+    border-bottom: 1px solid var(--border-subtle);
+    font-size: var(--font-size-xs);
+    flex-wrap: wrap;
+    min-height: 36px;
+}
+
+.dv-filter-input {
+    padding: 3px 8px;
+    background: var(--bg-0);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text-0);
+    font-size: var(--font-size-xs);
+    font-family: var(--font-mono);
+    width: 180px;
+    outline: none;
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+.dv-filter-input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent-subtle);
+    width: 240px;
+}
+.dv-filter-count {
+    font-family: var(--font-mono);
+    color: var(--text-3);
+    font-size: var(--font-size-xs);
+}
+
+/* DataView table */
+.dv-table { border-collapse: collapse; width: 100%; }
+.dv-table td {
+    max-width: 250px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    border-right: 1px solid var(--border-subtle);
+    height: 32px;
+}
+.dv-table th {
+    border-right: 1px solid var(--border-subtle);
+    height: 30px;
+    position: relative;
+    user-select: none;
+}
+.dv-table td:last-child, .dv-table th:last-child { border-right: none; }
+
+/* Sort indicators */
+.dv-table th.sortable { cursor: pointer; }
+.dv-table th.sortable:hover { background: var(--accent-subtle); }
+.dv-table th.sort-asc .dv-th-text::after { content: " \2191"; color: var(--accent); }
+.dv-table th.sort-desc .dv-th-text::after { content: " \2193"; color: var(--accent); }
+
+/* Column resize handle */
+.dv-resize-handle {
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 4px;
+    cursor: col-resize;
+    z-index: 1;
+}
+.dv-resize-handle:hover,
+.dv-resize-handle:active {
+    background: var(--accent);
+    opacity: 0.5;
+}
+
+/* Read-only cell (query results) */
+.dv-cell {
+    cursor: default;
+    padding: 1px 2px;
+    border-radius: 2px;
+}
+.dv-cell-selected {
+    background: var(--accent-subtle) !important;
+    box-shadow: inset 0 0 0 1px var(--accent);
+    outline: none;
+}
+.dv-cell-long { cursor: pointer; }
+
+/* Row selection */
+tr.dv-row-selected td {
+    background: var(--accent-subtle) !important;
+}
+.row-num {
+    cursor: pointer;
+    user-select: none;
+    color: var(--text-3);
+    font-family: var(--font-mono);
+    font-size: var(--font-size-xs);
+    text-align: center;
+    min-width: 36px;
+}
+.row-num:hover { color: var(--accent); }
+
+/* Cell status indicators */
+.cell-selected {
+    background: var(--accent-subtle) !important;
+    box-shadow: inset 0 0 0 1px var(--accent);
+}
+.cell-saving { opacity: 0.6; }
+.cell-saved {
+    background: var(--success-subtle);
+    box-shadow: inset 0 0 0 1px rgba(63, 185, 80, 0.3);
+    transition: background 0.3s, box-shadow 0.3s;
+}
+.cell-error {
+    background: var(--danger-subtle) !important;
+    box-shadow: inset 0 0 0 1px rgba(248, 81, 73, 0.4);
+}
+.row-active td { background: rgba(56, 139, 253, 0.04); }
+
+/* Insert form */
+.dv-insert-form {
+    padding: var(--sp-4);
+    background: var(--bg-1);
+    border-bottom: 2px solid var(--accent-dim);
+    animation: slideDown 0.2s ease-out;
+}
+
+/* Actions column */
+.dv-actions-header { width: 40px; }
+
+/* Toast notification */
+.dv-toast {
+    position: absolute;
+    top: var(--sp-2);
+    right: var(--sp-3);
+    padding: var(--sp-2) var(--sp-4);
+    background: var(--bg-1);
+    border: 1px solid var(--success);
+    border-radius: var(--radius);
+    color: var(--success);
+    font-size: var(--font-size-xs);
+    font-family: var(--font-mono);
+    opacity: 0;
+    transform: translateY(-4px);
+    transition: opacity 0.15s, transform 0.15s;
+    pointer-events: none;
+    z-index: 100;
+}
+.dv-toast-show {
+    opacity: 1;
+    transform: translateY(0);
+}
+

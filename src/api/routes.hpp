@@ -30,6 +30,8 @@ using AppRoutes = RouteTable<
     Route<GET, "/dashboard/health",                              DashboardHealthHandler>,
     Route<GET, "/dashboard/stats",                               DashboardStatsHandler>,
     Route<GET, "/dashboard/content",                             DashboardContentHandler>,
+    Route<GET, "/dashboard/activity",                            DashboardActivityHandler>,
+    Route<GET, "/dashboard/top-tables",                          DashboardTopTablesHandler>,
 
     // Database browsing
     Route<GET, "/databases",                                     DatabaseListHandler>,

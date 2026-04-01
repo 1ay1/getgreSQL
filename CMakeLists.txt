@@ -36,18 +36,20 @@ target_link_libraries(getgresql PRIVATE
 )
 
 # ── Asset embedding ──────────────────────────────────────────────────
-# Generate embedded asset headers from files in assets/
+# Source files in css/src/ and js/src/ are bundled into single files.
+# Other files (htmx.min.js) are embedded individually.
+file(GLOB CSS_SRC_FILES ${CMAKE_SOURCE_DIR}/assets/css/src/*.css)
+file(GLOB JS_SRC_FILES  ${CMAKE_SOURCE_DIR}/assets/js/src/*.js)
 add_custom_command(
     OUTPUT ${CMAKE_BINARY_DIR}/generated/embedded_assets.hpp
     COMMAND ${CMAKE_COMMAND} -P ${CMAKE_SOURCE_DIR}/cmake/EmbedAssets.cmake
         ${CMAKE_SOURCE_DIR}/assets
         ${CMAKE_BINARY_DIR}/generated/embedded_assets.hpp
     DEPENDS
-        ${CMAKE_SOURCE_DIR}/assets/css/style.css
-        ${CMAKE_SOURCE_DIR}/assets/js/app.js
-        ${CMAKE_SOURCE_DIR}/assets/js/dataview.js
-        ${CMAKE_SOURCE_DIR}/assets/js/editor.js
-    COMMENT "Embedding static assets"
+        ${CMAKE_SOURCE_DIR}/cmake/EmbedAssets.cmake
+        ${CSS_SRC_FILES}
+        ${JS_SRC_FILES}
+    COMMENT "Bundling and embedding static assets"
 )
 add_custom_target(embed_assets DEPENDS ${CMAKE_BINARY_DIR}/generated/embedded_assets.hpp)
 add_dependencies(getgresql embed_assets)

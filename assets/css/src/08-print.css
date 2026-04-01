@@ -1,0 +1,7 @@
+/* ─── Print styles ────────────────────────────────────────────────────── */
+@media print {
+    .sidebar, .toolbar, .status-bar, .tab-bar, .editor-toolbar, .data-toolbar .btn, .dv-toolbar { display: none !important; }
+    .ide { display: block !important; }
+    .workspace { margin: 0 !important; }
+    .content { padding: 0 !important; }
+}

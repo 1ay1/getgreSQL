@@ -1,0 +1,278 @@
+/* ─── Global scrollbars ───────────────────────────────────────────────── */
+* { scrollbar-width: thin; scrollbar-color: var(--bg-4) transparent; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--bg-4); border-radius: 4px; border: 2px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-4); background-clip: content-box; }
+::-webkit-scrollbar-corner { background: transparent; }
+
+/* Thin scrollbars in tight areas */
+.sidebar-tree::-webkit-scrollbar, .ac-popup::-webkit-scrollbar,
+.table-wrapper::-webkit-scrollbar { width: 6px; height: 6px; }
+
+/* ─── Focus rings (accessibility + visual) ────────────────────────────── */
+:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+    border-radius: var(--radius);
+}
+button:focus-visible, .btn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+    box-shadow: 0 0 0 3px var(--accent-subtle);
+}
+input:focus-visible, textarea:focus-visible, select:focus-visible {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent-subtle);
+}
+
+/* ─── Better link hover in tables ─────────────────────────────────────── */
+td a { text-decoration: none; font-weight: 500; }
+td a:hover { text-decoration: underline; color: var(--accent); }
+
+/* ─── Breadcrumbs polish ──────────────────────────────────────────────── */
+.breadcrumbs {
+    padding: var(--sp-2) 0;
+    margin-bottom: var(--sp-4);
+}
+.bc-link { transition: color var(--transition-fast); }
+
+/* ─── Section tab active state — thicker indicator ────────────────────── */
+.section-tab.active {
+    border-bottom-width: 2px;
+    color: var(--accent);
+    font-weight: 600;
+}
+.section-tab {
+    transition: all var(--transition-fast);
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+}
+.section-tab:hover:not(.active) {
+    color: var(--text-0);
+    border-bottom-color: var(--border);
+}
+
+/* ─── Data toolbar — better spacing and alignment ─────────────────────── */
+.data-toolbar {
+    padding: var(--sp-3) var(--sp-4);
+    gap: var(--sp-4);
+    flex-wrap: wrap;
+    border-bottom: 1px solid var(--border-subtle);
+    min-height: 40px;
+}
+.data-info {
+    font-weight: 500;
+    color: var(--text-1);
+}
+
+/* ─── Better null values ──────────────────────────────────────────────── */
+.null-value {
+    color: var(--text-4);
+    font-style: italic;
+    font-size: var(--font-size-xs);
+    /* minimal — just dim italic text, no background */
+}
+
+/* ─── Table sticky header shadow ──────────────────────────────────────── */
+thead th { box-shadow: 0 1px 0 var(--border); }
+
+/* ─── Row number column ───────────────────────────────────────────────── */
+/* ─── Better code blocks inside tables ────────────────────────────────── */
+td code {
+    font-size: 0.9em;
+    background: none;
+    padding: 0;
+    border: none;
+    color: var(--text-0);
+}
+
+/* ─── DDL source — better code display ────────────────────────────────── */
+.function-source, .ddl-source {
+    background: var(--bg-1);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    padding: var(--sp-5);
+    font-size: var(--font-size-xs);
+    line-height: 1.7;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 70vh;
+    overflow: auto;
+}
+
+
+
+.dashboard-grid {
+    gap: var(--sp-4);
+}
+.dashboard-section-header {
+    font-size: var(--font-size-sm);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--text-2);
+    padding: var(--sp-3) var(--sp-4);
+}
+
+/* ─── Server info badge ───────────────────────────────────────────────── */
+.server-info {
+    margin-bottom: var(--sp-5);
+    padding: var(--sp-2) 0;
+}
+.server-info code {
+    font-size: var(--font-size-xs);
+    background: var(--bg-2);
+    padding: var(--sp-1) var(--sp-3);
+    border-radius: var(--radius);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-2);
+    display: inline-block;
+}
+
+/* ─── Insert form — slide animation ───────────────────────────────────── */
+.insert-form {
+    animation: slideDown 0.2s ease-out;
+    border-bottom: 2px solid var(--accent-dim);
+}
+@keyframes slideDown {
+    from { opacity: 0; max-height: 0; overflow: hidden; }
+    to { opacity: 1; max-height: 500px; }
+}
+
+/* ─── Monitor section tabs — horizontal scroll on small screens ───────── */
+.section-tabs {
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    flex-shrink: 0;
+}
+.section-tabs::-webkit-scrollbar { display: none; }
+
+/* ─── Tooltip-style hover on badges ───────────────────────────────────── */
+.badge {
+    transition: all var(--transition-fast);
+    cursor: default;
+}
+.badge:hover {
+    filter: brightness(1.15);
+}
+
+/* ─── Better checkmark/cross styling in tables ────────────────────────── */
+/* ─── Right-click Context Menu ─────────────────────────────────────── */
+
+.ctx-menu {
+    position: fixed;
+    z-index: 10000;
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
+    padding: var(--sp-1) 0;
+    min-width: 220px;
+    max-width: 380px;
+    animation: acPopIn 0.1s ease-out;
+}
+
+.ctx-item {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    padding: 5px 12px;
+    font-size: var(--font-size-sm);
+    color: var(--text-1);
+    cursor: pointer;
+    transition: background 0.05s;
+}
+.ctx-item:hover {
+    background: var(--accent-subtle);
+    color: var(--text-0);
+}
+
+.ctx-icon {
+    width: 22px;
+    text-align: center;
+    font-size: var(--font-size-xs);
+    color: var(--text-3);
+    flex-shrink: 0;
+}
+
+.ctx-sep {
+    height: 1px;
+    background: var(--border-subtle);
+    margin: var(--sp-1) 0;
+}
+
+/* ─── Filter Banner ───────────────────────────────────────────────── */
+
+.filter-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--sp-2) var(--sp-3);
+    background: var(--accent-subtle);
+    border: 1px solid rgba(56, 139, 253, 0.2);
+    border-radius: var(--radius);
+    margin-bottom: var(--sp-2);
+    font-size: var(--font-size-xs);
+    color: var(--accent);
+    animation: fadeSlideIn 0.15s ease-out;
+}
+
+/* ─── Column Filter Input (in header) ─────────────────────────────── */
+
+.col-filter-input {
+    display: block;
+    width: 100%;
+    margin-top: 4px;
+    padding: 2px 6px;
+    background: var(--bg-0);
+    border: 1px solid var(--accent);
+    border-radius: 3px;
+    color: var(--text-0);
+    font-size: var(--font-size-xs);
+    font-family: var(--font-mono);
+    outline: none;
+    box-shadow: 0 0 0 2px var(--accent-subtle);
+}
+
+/* ─── Row number clickable ────────────────────────────────────────── */
+
+td.row-num { cursor: pointer; }
+td.row-num:hover { color: var(--accent); background: var(--accent-subtle); }
+
+/* ─── Command palette polish ──────────────────────────────────────────── */
+.command-overlay {
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+}
+
+/* ─── Smooth page load ────────────────────────────────────────────────── */
+.workspace {
+    animation: fadeIn 0.15s ease-out;
+}
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+/* ─── Better empty state ──────────────────────────────────────────────── */
+.empty-state {
+    padding: 4rem var(--sp-6);
+    color: var(--text-4);
+    font-size: var(--font-size-md);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--sp-3);
+}
+
+/* ─── Editable cell cursor hint ───────────────────────────────────────── */
+.editable-cell { cursor: cell; }
+.editable-cell:hover::after {
+    content: ' ';
+    display: inline-block;
+    width: 0;
+}
+

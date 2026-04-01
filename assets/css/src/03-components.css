@@ -1,0 +1,274 @@
+/* ─── Stat Cards ──────────────────────────────────────────────────────── */
+
+.stat-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: var(--sp-3);
+    margin-bottom: var(--sp-5);
+}
+
+.stat-card {
+    background: var(--bg-1);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    padding: var(--sp-4);
+    transition: border-color var(--transition-normal), transform var(--transition-normal), box-shadow var(--transition-normal);
+    box-shadow: var(--shadow-sm);
+}
+.stat-card:hover {
+    border-color: var(--border);
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-md);
+}
+
+.stat-value {
+    font-size: 1.3rem;
+    font-weight: 700;
+    color: var(--text-0);
+    font-family: var(--font-mono);
+    line-height: 1.2;
+}
+
+.stat-label {
+    font-size: var(--font-size-xs);
+    color: var(--text-3);
+    margin-top: var(--sp-1);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.stat-warning .stat-value { color: var(--warning); }
+.stat-danger .stat-value { color: var(--danger); }
+.stat-accent .stat-value { color: var(--accent); font-size: var(--font-size-md); }
+.stat-success .stat-value { color: var(--success); }
+
+/* ─── Data Grid (Tables) ─────────────────────────────────────────────── */
+
+.table-wrapper {
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    margin-bottom: var(--sp-4);
+    background: var(--bg-1);
+    box-shadow: var(--shadow-sm);
+}
+
+.table-wrapper.scrollable {
+    overflow-x: auto;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: var(--font-size-sm);
+}
+td, th { text-align: left; }
+
+/* Let table columns auto-size to content */
+table { table-layout: auto; }
+
+thead { background: var(--bg-2); }
+
+th {
+    background: var(--bg-2);
+    font-weight: 600;
+    color: var(--text-2);
+    text-align: left;
+    padding: 5px 8px;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+    font-size: var(--font-size-xs);
+    user-select: none;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+
+th.sortable { cursor: pointer; transition: color var(--transition-fast); }
+th.sortable:hover { color: var(--accent); }
+th.sorted-asc::after { content: " \25B2"; font-size: 8px; }
+th.sorted-desc::after { content: " \25BC"; font-size: 8px; }
+
+td {
+    padding: 4px 8px;
+    border-bottom: 1px solid var(--border-subtle);
+    vertical-align: middle;
+    line-height: 1.35;
+    font-size: var(--font-size-sm);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 250px;
+}
+
+/* Wide columns explicitly opt in to wrapping */
+td.wide { white-space: normal; max-width: 400px; word-break: break-word; }
+
+/* Data grid — compact, single-line, truncated */
+#data-grid { border-collapse: collapse; }
+#data-grid td {
+    max-width: 200px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    border-right: 1px solid var(--border-subtle);
+    height: 32px;
+}
+#data-grid th {
+    border-right: 1px solid var(--border-subtle);
+    height: 30px;
+}
+#data-grid td:last-child, #data-grid th:last-child { border-right: none; }
+
+tr:last-child td { border-bottom: none; }
+
+/* Zebra striping */
+tbody tr:nth-child(even) td { background: rgba(255, 255, 255, 0.02); }
+[data-theme="light"] tbody tr:nth-child(even) td { background: rgba(0, 0, 0, 0.02); }
+
+/* Row hover */
+tbody tr:hover td { background: rgba(56, 139, 253, 0.05); }
+
+.num {
+    text-align: right;
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+}
+
+.wide {
+    max-width: 500px;
+    word-break: break-word;
+}
+
+/* Row numbers column */
+td.row-num, th.row-num-header {
+    color: var(--text-4);
+    font-family: var(--font-mono);
+    font-size: var(--font-size-xs);
+    text-align: center;
+    width: 40px;
+    min-width: 40px;
+    max-width: 40px;
+    user-select: none;
+    border-right: 1px solid var(--border);
+    background: var(--bg-2);
+    padding: 4px 6px;
+    position: sticky;
+    left: 0;
+    z-index: 5;
+}
+
+/* ─── Badges ──────────────────────────────────────────────────────────── */
+
+.badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    line-height: 1.6;
+}
+.badge-default { background: var(--bg-4); color: var(--text-1); }
+.badge-primary { background: var(--accent-subtle); color: var(--accent); border: 1px solid rgba(56, 139, 253, 0.2); }
+.badge-secondary { background: none; color: var(--text-2); font-weight: 400; padding: 0; }
+.badge-warning { background: var(--warning-subtle); color: var(--warning); border: 1px solid rgba(210, 153, 34, 0.2); }
+.badge-danger { background: var(--danger-subtle); color: var(--danger); border: 1px solid rgba(248, 81, 73, 0.2); }
+.badge-success { background: var(--success-subtle); color: var(--success); border: 1px solid rgba(63, 185, 80, 0.2); }
+
+/* ─── Buttons ─────────────────────────────────────────────────────────── */
+
+.btn {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-2);
+    padding: 5px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg-2);
+    color: var(--text-1);
+    font-size: var(--font-size-sm);
+    font-family: var(--font-sans);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    white-space: nowrap;
+    text-decoration: none;
+    line-height: 1.4;
+    box-shadow: var(--shadow-sm);
+}
+.btn:hover {
+    background: var(--bg-3);
+    color: var(--text-0);
+    text-decoration: none;
+    box-shadow: var(--shadow-md);
+}
+.btn:active {
+    transform: translateY(1px);
+    box-shadow: none;
+}
+.btn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+    box-shadow: 0 0 0 4px var(--accent-subtle);
+}
+
+.btn-primary {
+    background: var(--accent-dim);
+    border-color: var(--accent-dim);
+    color: #fff;
+}
+.btn-primary:hover { background: var(--accent); }
+.btn-primary:active { background: var(--accent-dim); }
+
+.btn-success {
+    background: var(--success-subtle);
+    border-color: rgba(63, 185, 80, 0.3);
+    color: var(--success);
+}
+.btn-success:hover { background: rgba(63, 185, 80, 0.2); }
+
+.btn-warning {
+    background: var(--warning-subtle);
+    border-color: rgba(210, 153, 34, 0.3);
+    color: var(--warning);
+}
+.btn-warning:hover { background: rgba(210, 153, 34, 0.2); }
+
+.btn-danger {
+    border-color: rgba(248, 81, 73, 0.3);
+    color: var(--danger);
+    background: transparent;
+}
+.btn-danger:hover { background: var(--danger-subtle); }
+
+.btn-sm {
+    padding: 2px 8px;
+    font-size: var(--font-size-xs);
+}
+
+.btn-ghost {
+    background: transparent;
+    border-color: transparent;
+    box-shadow: none;
+}
+.btn-ghost:hover { background: var(--bg-2); box-shadow: none; }
+
+.btn-group {
+    display: flex;
+    gap: var(--sp-2);
+}
+
+kbd {
+    display: inline-block;
+    padding: 1px 5px;
+    background: var(--bg-0);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    font-size: var(--font-size-xs);
+    font-family: var(--font-mono);
+    margin-left: var(--sp-2);
+    color: var(--text-2);
+    box-shadow: 0 1px 0 var(--border);
+}
+
