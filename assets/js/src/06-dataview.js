@@ -347,17 +347,8 @@ function selectRow(row, dv, e) {
     lastClickedRow = row;
 }
 
-// ─── Read-only Cell Selection (for query results) ────────────────────
-
-var selectedDvCell = null;
-
-function selectDvCell(cell) {
-    if (selectedDvCell) selectedDvCell.classList.remove('dv-cell-selected');
-    selectedDvCell = cell;
-    if (cell) cell.classList.add('dv-cell-selected');
-}
-
 // ─── Event Delegation ────────────────────────────────────────────────
+// Cell selection is handled by 02-editing.js (unified for both .editable-cell and .dv-cell)
 
 document.addEventListener('click', function(e) {
     // Column sort
@@ -388,13 +379,6 @@ document.addEventListener('click', function(e) {
         }
     }
 
-    // Read-only cell click
-    var dvCell = e.target.closest('.dv-cell');
-    if (dvCell) {
-        selectDvCell(dvCell);
-        return;
-    }
-
     // Row number click -> row selection
     var rowNum = e.target.closest('.row-num');
     if (rowNum) {
@@ -402,11 +386,6 @@ document.addEventListener('click', function(e) {
         var dv = getDataView(rowNum);
         if (row && dv) selectRow(row, dv, e);
         return;
-    }
-
-    // Click outside deselects dv-cell
-    if (selectedDvCell && !e.target.closest('.data-view')) {
-        selectDvCell(null);
     }
 });
 
@@ -417,47 +396,19 @@ document.addEventListener('input', function(e) {
     if (dv) filterRows(dv, e.target.value);
 });
 
-// Keyboard shortcuts
+// Keyboard: Ctrl+C copies from data-view
 document.addEventListener('keydown', function(e) {
-    // Ctrl+C in a data-view
     if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
-        // Only intercept if focus is within a data-view and not in an input
         var active = document.activeElement;
         if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) return;
-        if (selectedDvCell || document.querySelector('.dv-row-selected')) {
-            var dv = selectedDvCell ? getDataView(selectedDvCell) : document.querySelector('.dv-row-selected').closest('.data-view');
+        var selected = document.querySelector('.cell-selected');
+        if (selected || document.querySelector('.dv-row-selected')) {
+            var dv = selected ? getDataView(selected) : document.querySelector('.dv-row-selected').closest('.data-view');
             if (dv) {
                 e.preventDefault();
                 copySelection(dv);
             }
         }
-    }
-
-    // Arrow keys for dv-cell navigation
-    if (selectedDvCell && ['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].indexOf(e.key) !== -1) {
-        var td = selectedDvCell.closest('td');
-        var tr = td ? td.closest('tr') : null;
-        if (!td || !tr) return;
-        e.preventDefault();
-
-        var target = null;
-        var idx = Array.from(tr.children).indexOf(td);
-
-        if (e.key === 'ArrowRight') {
-            var next = td.nextElementSibling;
-            while (next) { target = next.querySelector('.dv-cell'); if (target) break; next = next.nextElementSibling; }
-        } else if (e.key === 'ArrowLeft') {
-            var prev = td.previousElementSibling;
-            while (prev) { target = prev.querySelector('.dv-cell'); if (target) break; prev = prev.previousElementSibling; }
-        } else if (e.key === 'ArrowDown') {
-            var nextRow = tr.nextElementSibling;
-            if (nextRow && nextRow.cells[idx]) target = nextRow.cells[idx].querySelector('.dv-cell');
-        } else if (e.key === 'ArrowUp') {
-            var prevRow = tr.previousElementSibling;
-            if (prevRow && prevRow.cells[idx]) target = prevRow.cells[idx].querySelector('.dv-cell');
-        }
-
-        if (target) selectDvCell(target);
     }
 });
 

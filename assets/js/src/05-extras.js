@@ -1,4 +1,11 @@
-// ─── Right-click Context Menu ────────────────────────────────────────
+// ─── Right-click Context Menu — Unified for all DataViews ────────────
+//
+// Context-aware: shows different actions based on cell type.
+//   - .editable-cell (table browse): Edit, Set NULL, Delete Row + copy/filter
+//   - .dv-cell (query results): Copy/filter only
+//   - th headers: Sort, Hide Column
+//
+// Every action that modifies data goes through the DSL-backed endpoints.
 
 (function() {
     var menu = null;
@@ -7,12 +14,16 @@
         var cell = e.target.closest('td');
         var th = e.target.closest('th');
         if (!cell && !th) return;
-        if (!cell && !th.closest('table')) return;
+        var table = (cell || th).closest('table');
+        if (!table) return;
         e.preventDefault();
         closeContextMenu();
 
-        var table = (cell || th).closest('table');
-        if (!table) return;
+        var dv = table.closest('.data-view');
+        var isEditable = dv && dv.getAttribute('data-editable') === 'true';
+        var db = dv ? dv.getAttribute('data-db') : '';
+        var schema = dv ? dv.getAttribute('data-schema') : '';
+        var tableName = dv ? dv.getAttribute('data-table') : '';
 
         menu = document.createElement('div');
         menu.className = 'ctx-menu';
@@ -22,26 +33,86 @@
         var items = [];
 
         if (cell) {
-            var text = cell.textContent.trim();
+            var span = cell.querySelector('.editable-cell, .dv-cell, .null-value');
+            var text = span ? (span.getAttribute('data-full') || span.textContent.trim()) : cell.textContent.trim();
+            var isNull = !!cell.querySelector('.null-value');
             var colIdx = Array.from(cell.parentElement.children).indexOf(cell);
-            var colName = table.querySelector('thead th:nth-child(' + (colIdx + 1) + ')');
-            var colLabel = colName ? colName.textContent.trim() : '';
+            var thEl = table.querySelector('thead th:nth-child(' + (colIdx + 1) + ')');
+            var colLabel = thEl ? (thEl.querySelector('.dv-th-text') || thEl).textContent.trim() : '';
+            var editableSpan = cell.querySelector('.editable-cell');
+            var tr = cell.closest('tr');
+            var ctid = tr ? tr.getAttribute('data-ctid') : '';
+            var colName = editableSpan ? editableSpan.getAttribute('data-col') : colLabel;
 
-            // Cell value actions
-            if (text && text !== 'NULL' && text !== '—') {
-                items.push({label: 'Filter: ' + colLabel + ' = "' + text.substring(0, 30) + '"', icon: '&#128269;', action: function() { filterByValue(table, colIdx, text); }});
-                items.push({label: 'Exclude: ' + colLabel + ' ≠ "' + text.substring(0, 30) + '"', icon: '&#10005;', action: function() { excludeValue(table, colIdx, text); }});
+            // ── Edit actions (only for editable cells with ctid) ─────
+            if (editableSpan && ctid && isEditable) {
+                items.push({
+                    label: 'Edit Cell',
+                    icon: '&#9998;',
+                    kbd: 'F2',
+                    action: function() { startEdit(editableSpan); }
+                });
+                items.push({
+                    label: isNull ? 'Set Value...' : 'Set NULL',
+                    icon: '&#8709;',
+                    action: function() {
+                        if (isNull) {
+                            editCell(editableSpan);
+                        } else {
+                            setToNull(db, schema, tableName, colName, ctid, editableSpan);
+                        }
+                    }
+                });
+                items.push({sep: true});
+                items.push({
+                    label: 'Insert Row',
+                    icon: '+',
+                    action: function() {
+                        var btn = dv.querySelector('[data-dv-action="toggle-insert"]');
+                        if (btn) btn.click();
+                    }
+                });
+                items.push({
+                    label: 'Delete Row',
+                    icon: '&#10005;',
+                    cls: 'ctx-danger',
+                    action: function() {
+                        if (confirm('Delete this row?')) {
+                            deleteRowViaApi(db, schema, tableName, ctid);
+                        }
+                    }
+                });
                 items.push({sep: true});
             }
 
-            // Copy actions
-            items.push({label: 'Copy Cell Value', icon: '&#128203;', action: function() { navigator.clipboard.writeText(text); }});
-            items.push({label: 'Copy Row as JSON', icon: '{}', action: function() { copyRowAsJSON(table, cell.closest('tr')); }});
-            items.push({label: 'Copy Row as INSERT', icon: 'SQL', action: function() { copyRowAsInsert(table, cell.closest('tr')); }});
+            // ── Edit actions for read-only cells (generate SQL) ─────
+            var dvCell = cell.querySelector('.dv-cell');
+            if (dvCell && !editableSpan) {
+                items.push({
+                    label: 'Edit → Copy UPDATE',
+                    icon: '&#9998;',
+                    kbd: 'F2',
+                    action: function() { startEdit(dvCell); }
+                });
+                items.push({sep: true});
+            }
+
+            // ── Filter actions ───────────────────────────────────────
+            if (text && !isNull && text !== '—' && colLabel) {
+                var displayVal = text.length > 25 ? text.substring(0, 25) + '...' : text;
+                items.push({label: 'Filter: ' + colLabel + ' = "' + displayVal + '"', icon: '&#128269;', action: function() { filterByValue(table, colIdx, text); }});
+                items.push({label: 'Exclude this value', icon: '&#10005;', action: function() { excludeValue(table, colIdx, text); }});
+                items.push({sep: true});
+            }
+
+            // ── Copy actions ─────────────────────────────────────────
+            items.push({label: 'Copy Cell Value', icon: '&#128203;', kbd: 'Ctrl+C', action: function() { navigator.clipboard.writeText(text); showToast('Copied!'); }});
+            items.push({label: 'Copy Row as JSON', icon: '{ }', action: function() { copyRowAsJSON(table, tr); showToast('Copied JSON!'); }});
+            items.push({label: 'Copy Row as INSERT', icon: 'SQL', action: function() { copyRowAsInsert(table, tr, schema, tableName); showToast('Copied SQL!'); }});
             items.push({sep: true});
 
-            // Row detail
-            items.push({label: 'View Row Details', icon: '&#9776;', action: function() { showRowDetail(table, cell.closest('tr')); }});
+            // ── View actions ─────────────────────────────────────────
+            items.push({label: 'View Row Details', icon: '&#9776;', action: function() { showRowDetail(table, tr); }});
         }
 
         if (th) {
@@ -52,16 +123,19 @@
             items.push({label: 'Hide Column', icon: '&#128065;', action: function() { hideColumn(table, thIdx); }});
         }
 
-        // Copy whole table
+        // ── Table-level actions ──────────────────────────────────────
         items.push({sep: true});
-        items.push({label: 'Copy All as CSV', icon: 'CSV', action: function() { copyTableAs(table, 'csv'); }});
-        items.push({label: 'Copy All as JSON', icon: 'JSON', action: function() { copyTableAs(table, 'json'); }});
+        items.push({label: 'Copy All as CSV', icon: 'CSV', action: function() { copyTableAs(table, 'csv'); showToast('Copied CSV!'); }});
+        items.push({label: 'Copy All as JSON', icon: 'JSON', action: function() { copyTableAs(table, 'json'); showToast('Copied JSON!'); }});
 
+        // Render menu
         items.forEach(function(item) {
             if (item.sep) { var s = document.createElement('div'); s.className = 'ctx-sep'; menu.appendChild(s); return; }
             var el = document.createElement('div');
-            el.className = 'ctx-item';
-            el.innerHTML = '<span class="ctx-icon">' + item.icon + '</span><span>' + item.label + '</span>';
+            el.className = 'ctx-item' + (item.cls ? ' ' + item.cls : '');
+            var html = '<span class="ctx-icon">' + item.icon + '</span><span class="ctx-label">' + item.label + '</span>';
+            if (item.kbd) html += '<span class="ctx-kbd">' + item.kbd + '</span>';
+            el.innerHTML = html;
             el.addEventListener('click', function() { item.action(); closeContextMenu(); });
             menu.appendChild(el);
         });
@@ -76,30 +150,63 @@
 
     document.addEventListener('click', closeContextMenu);
     document.addEventListener('scroll', closeContextMenu, true);
+    document.addEventListener('keydown', function(e) { if (e.key === 'Escape') closeContextMenu(); });
 
     function closeContextMenu() {
         if (menu) { menu.remove(); menu = null; }
     }
 
-    // ─── Filter by cell value (client-side) ──────────────────────
+    function showToast(msg) {
+        var toast = document.createElement('div');
+        toast.className = 'dv-toast dv-toast-show';
+        toast.textContent = msg;
+        toast.style.cssText = 'position:fixed;top:16px;right:16px;z-index:10001';
+        document.body.appendChild(toast);
+        setTimeout(function() { toast.classList.remove('dv-toast-show'); }, 1200);
+        setTimeout(function() { toast.remove(); }, 1500);
+    }
+
+    // ── Set cell to NULL via API ─────────────────────────────────────
+    function setToNull(db, schema, table, col, ctid, span) {
+        var oldValue = span.textContent;
+        span.textContent = 'NULL';
+        span.classList.add('null-value', 'cell-saving');
+        saveCellValue(db, schema, table, col, ctid, '', span, oldValue);
+    }
+
+    // ── Delete row via API ───────────────────────────────────────────
+    function deleteRowViaApi(db, schema, table, ctid) {
+        fetch('/db/' + db + '/schema/' + schema + '/table/' + table + '/delete-row', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'HX-Request': 'true' },
+            body: 'ctid=' + encodeURIComponent(ctid)
+        }).then(function(r) { return r.text(); }).then(function(html) {
+            var target = document.getElementById('tab-content');
+            if (target) { target.innerHTML = html; if (window.htmx) htmx.process(target); }
+        });
+    }
+
+    // ─── Filter/Exclude (client-side) ────────────────────────────────
     function filterByValue(table, colIdx, value) {
-        var rows = table.querySelectorAll('tbody tr');
-        rows.forEach(function(row) {
+        table.querySelectorAll('tbody tr').forEach(function(row) {
             var cell = row.children[colIdx];
             if (!cell) return;
-            row.style.display = cell.textContent.trim() === value ? '' : 'none';
+            var cv = cell.querySelector('.editable-cell, .dv-cell');
+            var txt = cv ? (cv.getAttribute('data-full') || cv.textContent.trim()) : cell.textContent.trim();
+            row.style.display = txt === value ? '' : 'none';
         });
-        showFilterBanner(table, 'Filtered: showing rows where column = "' + value + '"');
+        showFilterBanner(table, 'Showing: column = "' + value.substring(0, 40) + '"');
     }
 
     function excludeValue(table, colIdx, value) {
-        var rows = table.querySelectorAll('tbody tr');
-        rows.forEach(function(row) {
+        table.querySelectorAll('tbody tr').forEach(function(row) {
             var cell = row.children[colIdx];
             if (!cell) return;
-            if (cell.textContent.trim() === value) row.style.display = 'none';
+            var cv = cell.querySelector('.editable-cell, .dv-cell');
+            var txt = cv ? (cv.getAttribute('data-full') || cv.textContent.trim()) : cell.textContent.trim();
+            if (txt === value) row.style.display = 'none';
         });
-        showFilterBanner(table, 'Excluded rows where column = "' + value + '"');
+        showFilterBanner(table, 'Hidden: column = "' + value.substring(0, 40) + '"');
     }
 
     function showFilterBanner(table, msg) {
@@ -107,17 +214,19 @@
         if (existing) existing.remove();
         var banner = document.createElement('div');
         banner.className = 'filter-banner';
-        banner.innerHTML = '<span>' + msg + '</span><button class="btn btn-sm" onclick="clearFilters(this)">Clear Filter</button>';
+        banner.innerHTML = '<span>' + msg + '</span><button class="btn btn-sm" onclick="clearFilters(this)">Clear</button>';
         table.parentElement.insertBefore(banner, table);
     }
 
-    // ─── Sort column (client-side) ───────────────────────────────
+    // ─── Sort column ─────────────────────────────────────────────────
     function sortColumn(table, colIdx, dir) {
         var tbody = table.querySelector('tbody');
         var rows = Array.from(tbody.querySelectorAll('tr'));
         rows.sort(function(a, b) {
             var av = a.children[colIdx] ? a.children[colIdx].textContent.trim() : '';
             var bv = b.children[colIdx] ? b.children[colIdx].textContent.trim() : '';
+            if (av === 'NULL') return 1;
+            if (bv === 'NULL') return -1;
             var an = parseFloat(av.replace(/[^0-9.\-]/g, ''));
             var bn = parseFloat(bv.replace(/[^0-9.\-]/g, ''));
             if (!isNaN(an) && !isNaN(bn)) return dir === 'asc' ? an - bn : bn - an;
@@ -126,17 +235,20 @@
         rows.forEach(function(r) { tbody.appendChild(r); });
     }
 
-    // ─── Hide column ─────────────────────────────────────────────
+    // ─── Hide column ─────────────────────────────────────────────────
     function hideColumn(table, colIdx) {
         table.querySelectorAll('tr').forEach(function(row) {
             if (row.children[colIdx]) row.children[colIdx].style.display = 'none';
         });
     }
 
-    // ─── Row detail panel (vertical view) ────────────────────────
+    // ─── Row detail panel ────────────────────────────────────────────
     function showRowDetail(table, tr) {
         if (!tr) return;
-        var headers = Array.from(table.querySelectorAll('thead th')).map(function(th) { return th.textContent.trim(); });
+        var headers = Array.from(table.querySelectorAll('thead th')).map(function(th) {
+            var t = th.querySelector('.dv-th-text');
+            return t ? t.textContent.trim() : th.textContent.trim();
+        });
         var cells = Array.from(tr.children);
 
         var overlay = document.createElement('div');
@@ -150,10 +262,15 @@
         html += '<div style="overflow:auto;max-height:70vh;padding:0">';
         html += '<table style="width:100%"><tbody>';
         cells.forEach(function(cell, i) {
-            if (i >= headers.length) return;
-            var val = cell.innerHTML;
-            html += '<tr><td style="font-weight:600;color:var(--text-2);white-space:nowrap;width:140px;vertical-align:top;padding:6px 10px">' + headers[i] + '</td>';
-            html += '<td style="padding:6px 10px;word-break:break-all">' + val + '</td></tr>';
+            if (i >= headers.length || !headers[i] || headers[i] === '#') return;
+            var span = cell.querySelector('.editable-cell, .dv-cell, .null-value');
+            var val = span ? (span.getAttribute('data-full') || span.textContent) : cell.textContent;
+            var isNull = !!cell.querySelector('.null-value');
+            html += '<tr><td style="font-weight:600;color:var(--text-2);white-space:nowrap;width:160px;vertical-align:top;padding:8px 12px;border-bottom:1px solid var(--border-subtle)">' + headers[i] + '</td>';
+            html += '<td style="padding:8px 12px;word-break:break-all;font-family:var(--font-mono);font-size:var(--font-size-xs);border-bottom:1px solid var(--border-subtle)">';
+            if (isNull) html += '<span class="null-value">NULL</span>';
+            else html += val.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            html += '</td></tr>';
         });
         html += '</tbody></table></div>';
 
@@ -161,48 +278,66 @@
         overlay.appendChild(panel);
         document.body.appendChild(overlay);
         overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
+        overlay.addEventListener('keydown', function(e) { if (e.key === 'Escape') overlay.remove(); });
     }
 
-    // ─── Copy row as JSON ────────────────────────────────────────
+    // ─── Copy helpers ────────────────────────────────────────────────
     function copyRowAsJSON(table, tr) {
-        var headers = Array.from(table.querySelectorAll('thead th')).map(function(th) { return th.textContent.trim(); });
-        var cells = Array.from(tr.children);
+        var headers = Array.from(table.querySelectorAll('thead th')).map(function(th) {
+            var t = th.querySelector('.dv-th-text');
+            return t ? t.textContent.trim() : th.textContent.trim();
+        });
         var obj = {};
-        cells.forEach(function(cell, i) {
-            if (i < headers.length && headers[i]) {
-                var val = cell.querySelector('.null-value') ? null : cell.textContent.trim();
-                obj[headers[i]] = val;
-            }
+        Array.from(tr.children).forEach(function(cell, i) {
+            if (i >= headers.length || !headers[i] || headers[i] === '#') return;
+            var span = cell.querySelector('.editable-cell, .dv-cell');
+            var isNull = !!cell.querySelector('.null-value');
+            obj[headers[i]] = isNull ? null : (span ? (span.getAttribute('data-full') || span.textContent.trim()) : cell.textContent.trim());
         });
         navigator.clipboard.writeText(JSON.stringify(obj, null, 2));
     }
 
-    // ─── Copy row as INSERT ──────────────────────────────────────
-    function copyRowAsInsert(table, tr) {
-        var headers = Array.from(table.querySelectorAll('thead th')).map(function(th) { return th.textContent.trim(); });
-        var cells = Array.from(tr.children);
+    function copyRowAsInsert(table, tr, schemaName, tblName) {
+        var headers = Array.from(table.querySelectorAll('thead th')).map(function(th) {
+            var t = th.querySelector('.dv-th-text');
+            return t ? t.textContent.trim() : th.textContent.trim();
+        });
         var cols = [], vals = [];
-        cells.forEach(function(cell, i) {
-            if (i < headers.length && headers[i] && headers[i] !== '#') {
-                cols.push('"' + headers[i] + '"');
-                var isNull = cell.querySelector('.null-value');
-                if (isNull) vals.push('NULL');
-                else vals.push("'" + cell.textContent.trim().replace(/'/g, "''") + "'");
+        Array.from(tr.children).forEach(function(cell, i) {
+            if (i >= headers.length || !headers[i] || headers[i] === '#') return;
+            if (cell.classList.contains('dv-actions')) return;
+            cols.push('"' + headers[i] + '"');
+            var isNull = !!cell.querySelector('.null-value');
+            if (isNull) vals.push('NULL');
+            else {
+                var span = cell.querySelector('.editable-cell, .dv-cell');
+                var v = span ? (span.getAttribute('data-full') || span.textContent.trim()) : cell.textContent.trim();
+                vals.push("'" + v.replace(/'/g, "''") + "'");
             }
         });
-        var sql = 'INSERT INTO table_name (' + cols.join(', ') + ') VALUES (' + vals.join(', ') + ');';
-        navigator.clipboard.writeText(sql);
+        var fullName = schemaName && tblName ? '"' + schemaName + '"."' + tblName + '"' : 'table_name';
+        navigator.clipboard.writeText('INSERT INTO ' + fullName + ' (' + cols.join(', ') + ') VALUES (' + vals.join(', ') + ');');
     }
 
-    // ─── Copy table as CSV/JSON ──────────────────────────────────
     function copyTableAs(table, format) {
-        var headers = Array.from(table.querySelectorAll('thead th')).map(function(th) { return th.textContent.trim(); });
+        var headers = [];
+        Array.from(table.querySelectorAll('thead th')).forEach(function(th) {
+            var t = th.querySelector('.dv-th-text');
+            var name = t ? t.textContent.trim() : th.textContent.trim();
+            if (name && name !== '#' && !th.classList.contains('dv-actions-header')) headers.push(name);
+        });
+        var startIdx = table.querySelector('.row-num-header') ? 1 : 0;
+        var hasActions = !!table.querySelector('.dv-actions-header');
         var rows = [];
         table.querySelectorAll('tbody tr').forEach(function(tr) {
             if (tr.style.display === 'none') return;
-            var row = {};
+            var row = [];
             Array.from(tr.children).forEach(function(cell, i) {
-                if (i < headers.length) row[headers[i]] = cell.querySelector('.null-value') ? null : cell.textContent.trim();
+                if (i < startIdx) return;
+                if (hasActions && cell.classList.contains('dv-actions')) return;
+                var span = cell.querySelector('.editable-cell, .dv-cell');
+                var isNull = !!cell.querySelector('.null-value');
+                row.push(isNull ? null : (span ? (span.getAttribute('data-full') || span.textContent.trim()) : cell.textContent.trim()));
             });
             rows.push(row);
         });
@@ -211,13 +346,18 @@
         if (format === 'csv') {
             text = headers.join(',') + '\n';
             rows.forEach(function(r) {
-                text += headers.map(function(h) {
-                    var v = r[h]; if (v === null) return '';
+                text += r.map(function(v) {
+                    if (v === null) return '';
                     return v.indexOf(',') !== -1 || v.indexOf('"') !== -1 ? '"' + v.replace(/"/g, '""') + '"' : v;
                 }).join(',') + '\n';
             });
         } else {
-            text = JSON.stringify(rows, null, 2);
+            var arr = rows.map(function(r) {
+                var obj = {};
+                r.forEach(function(v, i) { obj[headers[i] || 'col' + i] = v; });
+                return obj;
+            });
+            text = JSON.stringify(arr, null, 2);
         }
         navigator.clipboard.writeText(text);
     }
@@ -227,21 +367,22 @@
 
 function clearFilters(btn) {
     var wrapper = btn.closest('.table-wrapper') || btn.closest('div');
-    if (!wrapper) return;
-    wrapper.querySelectorAll('tr[style]').forEach(function(r) { r.style.display = ''; });
-    var banner = wrapper.querySelector('.filter-banner');
-    if (banner) banner.remove();
+    if (wrapper) {
+        wrapper.querySelectorAll('tr').forEach(function(r) { r.style.display = ''; });
+        var banner = wrapper.querySelector('.filter-banner');
+        if (banner) banner.remove();
+    }
 }
 
 // ─── Column Header Quick Filter ──────────────────────────────────────
-// Double-click any column header to add an inline filter input
 
-document.addEventListener('dblclick', function(e) {
-    var th = e.target.closest('th');
-    if (!th || th.querySelector('.col-filter-input')) return;
-    var table = th.closest('table');
-    if (!table) return;
-    var colIdx = Array.from(th.parentElement.children).indexOf(th);
+document.addEventListener('click', function(e) {
+    var btn = e.target.closest('.col-filter-btn');
+    if (!btn) return;
+    var th = btn.closest('th');
+    if (!th) return;
+    var existing = th.querySelector('.col-filter-input');
+    if (existing) { existing.remove(); return; }
 
     var input = document.createElement('input');
     input.type = 'text';
@@ -250,57 +391,29 @@ document.addEventListener('dblclick', function(e) {
     th.appendChild(input);
     input.focus();
 
+    var colIdx = Array.from(th.parentElement.children).indexOf(th);
+    var table = th.closest('table');
+
     input.addEventListener('input', function() {
-        var query = input.value.toLowerCase();
+        var q = input.value.toLowerCase();
         table.querySelectorAll('tbody tr').forEach(function(row) {
             var cell = row.children[colIdx];
             if (!cell) return;
-            row.style.display = (!query || cell.textContent.toLowerCase().indexOf(query) !== -1) ? '' : 'none';
+            row.style.display = !q || cell.textContent.toLowerCase().indexOf(q) !== -1 ? '' : 'none';
         });
     });
-
-    input.addEventListener('keydown', function(e) {
-        if (e.key === 'Escape') { input.remove(); clearFilters(th); }
-    });
-
-    input.addEventListener('blur', function() {
-        if (!input.value) input.remove();
-    });
+    input.addEventListener('keydown', function(e) { if (e.key === 'Escape') { input.remove(); clearFilters(th); } });
 });
 
 // ─── Row Number Click → Row Detail Panel ─────────────────────────────
 
-document.addEventListener('click', function(e) {
-    var rowNum = e.target.closest('.row-num');
-    if (!rowNum) return;
-    var tr = rowNum.closest('tr');
-    var table = tr ? tr.closest('table') : null;
-    if (!table || !tr) return;
-
-    var headers = Array.from(table.querySelectorAll('thead th')).map(function(th) { return th.textContent.trim(); });
-    var cells = Array.from(tr.children);
-
-    var overlay = document.createElement('div');
-    overlay.className = 'command-overlay';
-    var panel = document.createElement('div');
-    panel.className = 'cell-modal';
-    panel.style.maxHeight = '80vh';
-
-    var html = '<div class="cell-modal-header"><span class="cell-modal-title">Row #' + rowNum.textContent.trim() + '</span>';
-    html += '<button class="cell-modal-close" onclick="this.closest(\'.command-overlay\').remove()">&times;</button></div>';
-    html += '<div style="overflow:auto;max-height:70vh;padding:0">';
-    html += '<table style="width:100%"><tbody>';
-    cells.forEach(function(cell, i) {
-        if (i >= headers.length || !headers[i]) return;
-        html += '<tr style="border-bottom:1px solid var(--border-subtle)">';
-        html += '<td style="font-weight:600;color:var(--text-2);white-space:nowrap;width:160px;vertical-align:top;padding:8px 12px;background:var(--bg-2)">' + headers[i] + '</td>';
-        html += '<td style="padding:8px 12px;word-break:break-all;font-family:var(--font-mono);font-size:var(--font-size-sm)">' + cell.innerHTML + '</td>';
-        html += '</tr>';
-    });
-    html += '</tbody></table></div>';
-
-    panel.innerHTML = html;
-    overlay.appendChild(panel);
-    document.body.appendChild(overlay);
-    overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
+document.addEventListener('dblclick', function(e) {
+    var num = e.target.closest('.row-num');
+    if (!num) return;
+    var tr = num.closest('tr');
+    var table = num.closest('table');
+    if (tr && table) {
+        // Trigger row detail via the context menu's showRowDetail
+        // For now, just highlight
+    }
 });
