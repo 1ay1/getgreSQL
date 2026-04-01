@@ -17,40 +17,6 @@ static auto escape(std::string_view s) -> std::string {
     return std::move(h).finish();
 }
 
-// ─── URL decode helper ──────────────────────────────────────────────
-
-static auto url_decode(std::string_view input) -> std::string {
-    std::string decoded;
-    decoded.reserve(input.size());
-    for (std::size_t i = 0; i < input.size(); ++i) {
-        if (input[i] == '+') {
-            decoded += ' ';
-        } else if (input[i] == '%' && i + 2 < input.size()) {
-            auto hex = std::string(input.substr(i + 1, 2));
-            decoded += static_cast<char>(std::stoi(hex, nullptr, 16));
-            i += 2;
-        } else {
-            decoded += input[i];
-        }
-    }
-    return decoded;
-}
-
-// ─── Form parsing helper ────────────────────────────────────────────
-
-static auto form_value(std::string_view body, std::string_view key) -> std::string {
-    auto needle = std::string(key) + "=";
-    auto pos = body.find(needle);
-    if (pos == std::string_view::npos) return {};
-
-    auto start = pos + needle.size();
-    auto end = body.find('&', start);
-    auto raw = (end == std::string_view::npos)
-        ? body.substr(start)
-        : body.substr(start, end - start);
-    return url_decode(raw);
-}
-
 // ─── RolesHandler ───────────────────────────────────────────────────
 
 auto RolesHandler::handle(Request& req, AppContext& ctx) -> Response {
