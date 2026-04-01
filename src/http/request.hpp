@@ -18,6 +18,27 @@ class Request {
     PathMatch path_match_;  // populated by router after matching
     std::unordered_map<std::string, std::string> query_params_;
 
+    static auto url_decode(std::string_view s) -> std::string {
+        std::string out;
+        out.reserve(s.size());
+        for (std::size_t i = 0; i < s.size(); ++i) {
+            if (s[i] == '+') out += ' ';
+            else if (s[i] == '%' && i + 2 < s.size()) {
+                auto hi = s[i+1], lo = s[i+2];
+                auto hex = [](char c) -> int {
+                    if (c >= '0' && c <= '9') return c - '0';
+                    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+                    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+                    return -1;
+                };
+                auto h = hex(hi), l = hex(lo);
+                if (h >= 0 && l >= 0) { out += static_cast<char>((h << 4) | l); i += 2; }
+                else out += s[i];
+            } else out += s[i];
+        }
+        return out;
+    }
+
     void parse_query_string() {
         auto target = std::string_view(req_.target());
         auto qpos = target.find('?');
@@ -29,8 +50,8 @@ class Request {
             auto pair = qs.substr(0, amp);
             auto eq = pair.find('=');
             if (eq != std::string_view::npos) {
-                query_params_[std::string(pair.substr(0, eq))] =
-                    std::string(pair.substr(eq + 1));
+                query_params_[url_decode(pair.substr(0, eq))] =
+                    url_decode(pair.substr(eq + 1));
             }
             if (amp == std::string_view::npos) break;
             qs = qs.substr(amp + 1);

@@ -31,9 +31,10 @@
     });
 
     // ── Double-click to edit ─────────────────────────────────────────
+    // Skip cells with hx-get — those are handled by htmx SSR editing
     document.addEventListener('dblclick', function(e) {
         var cell = e.target.closest(CELL_SEL);
-        if (cell) startEdit(cell);
+        if (cell && !cell.hasAttribute('hx-get')) startEdit(cell);
     });
 
     // ── Keyboard ─────────────────────────────────────────────────────
@@ -50,7 +51,12 @@
 
         if (e.key === 'Enter' || e.key === 'F2') {
             e.preventDefault();
-            startEdit(selectedCell);
+            // htmx-managed cells: trigger htmx click to load edit form
+            if (selectedCell.hasAttribute('hx-get')) {
+                htmx.trigger(selectedCell, 'dblclick');
+            } else {
+                startEdit(selectedCell);
+            }
         } else if (e.key === 'Tab') {
             e.preventDefault();
             var next = e.shiftKey ? getPrev(td, tr) : getNext(td, tr);
@@ -76,7 +82,11 @@
             deselectCell();
         } else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey) {
             e.preventDefault();
-            startEdit(selectedCell, e.key);
+            if (selectedCell.hasAttribute('hx-get')) {
+                htmx.trigger(selectedCell, 'dblclick');
+            } else {
+                startEdit(selectedCell, e.key);
+            }
         }
     });
 

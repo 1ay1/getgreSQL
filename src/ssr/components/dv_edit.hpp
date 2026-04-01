@@ -8,6 +8,24 @@
 #include "ssr/components/badge.hpp"
 
 #include <string>
+
+namespace dv_detail {
+inline auto url_encode(std::string_view s) -> std::string {
+    std::string out;
+    out.reserve(s.size() + 16);
+    for (unsigned char c : s) {
+        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+            (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' || c == '~') {
+            out += static_cast<char>(c);
+        } else {
+            out += '%';
+            out += "0123456789ABCDEF"[c >> 4];
+            out += "0123456789ABCDEF"[c & 0xF];
+        }
+    }
+    return out;
+}
+} // namespace dv_detail
 #include <string_view>
 #include <vector>
 
@@ -101,11 +119,13 @@ struct DvSavedCell {
 
 private:
     static auto edit_url_for(const Props& p) -> std::string {
-        auto h = Html::with_capacity(256);
-        h.raw("/dv/edit-cell?db=").text(p.db).raw("&schema=").text(p.schema)
-         .raw("&table=").text(p.table).raw("&col=").text(p.col)
-         .raw("&ctid=").text(p.ctid).raw("&val=").text(p.val);
-        return std::move(h).finish();
+        using dv_detail::url_encode;
+        return "/dv/edit-cell?db=" + url_encode(p.db) +
+               "&amp;schema=" + url_encode(p.schema) +
+               "&amp;table=" + url_encode(p.table) +
+               "&amp;col=" + url_encode(p.col) +
+               "&amp;ctid=" + url_encode(p.ctid) +
+               "&amp;val=" + url_encode(p.val);
     }
 };
 

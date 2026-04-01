@@ -37,6 +37,25 @@
 #include <format>
 #include <string>
 #include <string_view>
+
+namespace getgresql::ssr::detail {
+// URL-encode a string for use in query parameters
+inline auto url_encode(std::string_view s) -> std::string {
+    std::string out;
+    out.reserve(s.size() + 16);
+    for (unsigned char c : s) {
+        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+            (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' || c == '~') {
+            out += static_cast<char>(c);
+        } else {
+            out += '%';
+            out += "0123456789ABCDEF"[c >> 4];
+            out += "0123456789ABCDEF"[c & 0xF];
+        }
+    }
+    return out;
+}
+} // namespace getgresql::ssr::detail
 #include <vector>
 
 namespace getgresql::ssr {
@@ -212,12 +231,14 @@ private:
         }
 
         // htmx: double-click → server returns inline edit form
-        h_.raw(" hx-get=\"/dv/edit-cell?db=").text(db_)
-         .raw("&schema=").text(schema_).raw("&table=").text(table_)
-         .raw("&table_oid=").raw(oid_str)
-         .raw("&col=").text(col_name)
-         .raw("&ctid=").text(ctid)
-         .raw("&val=").text(val)
+        // URL-encode parameters to handle UTF-8, spaces, special chars
+        h_.raw(" hx-get=\"/dv/edit-cell?db=").raw(detail::url_encode(db_))
+         .raw("&amp;schema=").raw(detail::url_encode(schema_))
+         .raw("&amp;table=").raw(detail::url_encode(table_))
+         .raw("&amp;table_oid=").raw(oid_str)
+         .raw("&amp;col=").raw(detail::url_encode(col_name))
+         .raw("&amp;ctid=").raw(detail::url_encode(ctid))
+         .raw("&amp;val=").raw(detail::url_encode(val))
          .raw("\" hx-trigger=\"dblclick\" hx-target=\"closest td\" hx-swap=\"innerHTML\">");
 
         if (cell.is_null) {
