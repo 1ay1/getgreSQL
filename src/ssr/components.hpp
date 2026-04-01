@@ -33,6 +33,7 @@
 #include "ssr/components/section_tabs.hpp"
 #include "ssr/components/tree_node.hpp"
 #include "ssr/components/page_layout.hpp"
+#include "ssr/components/dv_edit.hpp"
 
 #include <format>
 #include <string>

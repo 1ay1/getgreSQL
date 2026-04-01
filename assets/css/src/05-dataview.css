@@ -446,3 +446,78 @@ tr.dv-row-selected td {
     transform: translateY(0);
 }
 
+
+/* ─── Cell Lineage Panel (Explain This) ──────────────────────────────── */
+
+.dv-lineage-panel {
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-md);
+    padding: 0;
+    max-width: 420px;
+    font-size: var(--font-size-xs);
+    animation: acPopIn 0.12s ease-out;
+}
+
+.dv-lineage-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--sp-2) var(--sp-3);
+    border-bottom: 1px solid var(--border-subtle);
+    font-weight: 700;
+    font-size: var(--font-size-sm);
+    color: var(--text-0);
+}
+.dv-lineage-close {
+    background: none;
+    border: none;
+    color: var(--text-3);
+    cursor: pointer;
+    font-size: 1rem;
+    padding: 0 var(--sp-1);
+}
+.dv-lineage-close:hover { color: var(--text-0); }
+
+.dv-lineage-section {
+    padding: var(--sp-2) var(--sp-3);
+    border-bottom: 1px solid var(--border-subtle);
+}
+.dv-lineage-section:last-child { border-bottom: none; }
+
+.dv-lineage-label {
+    font-size: 0.6rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-4);
+    margin-bottom: 2px;
+}
+
+.dv-lineage-value {
+    color: var(--text-1);
+    font-family: var(--font-mono);
+    word-break: break-all;
+}
+.dv-lineage-value a { color: var(--accent); }
+.dv-lineage-value code {
+    background: none;
+    padding: 0;
+    color: inherit;
+}
+
+.dv-lineage-comment {
+    font-style: italic;
+    color: var(--text-3);
+    font-family: var(--font-sans);
+}
+
+.dv-lineage-default {
+    color: var(--text-3);
+}
+
+/* Inline edit form inside cell */
+.dv-edit-form {
+    display: contents;
+}

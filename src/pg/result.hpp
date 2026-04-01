@@ -62,6 +62,16 @@ public:
         };
     }
 
+    // Source table OID for a result column (0 if computed/expression)
+    auto column_table_oid(int col) const noexcept -> unsigned int {
+        return static_cast<unsigned int>(PQftable(res_.get(), col));
+    }
+
+    // Source column number within the table (0 if computed)
+    auto column_table_col(int col) const noexcept -> int {
+        return PQftablecol(res_.get(), col);
+    }
+
     auto columns() const -> std::vector<ColumnInfo> {
         std::vector<ColumnInfo> cols;
         cols.reserve(static_cast<std::size_t>(col_count()));

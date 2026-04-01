@@ -2,6 +2,7 @@
 
 #include "api/handlers_admin.hpp"
 #include "api/handlers_db.hpp"
+#include "api/handlers_dv.hpp"
 #include "api/handlers_monitor.hpp"
 #include "api/handlers_query.hpp"
 #include "api/handlers_schema.hpp"
@@ -115,6 +116,12 @@ using AppRoutes = RouteTable<
 
     // Query explain (used by editor.js)
     Route<POST, "/query/explain",                                   ExplainExecHandler>,
+
+    // SSR DataView operations (htmx-driven cell editing, lineage)
+    Route<GET,  "/dv/edit-cell",                                    DvEditCellHandler>,
+    Route<POST, "/dv/save-cell",                                    DvSaveCellHandler>,
+    Route<POST, "/dv/set-null",                                     DvSetNullHandler>,
+    Route<GET,  "/dv/explain-cell",                                 DvExplainCellHandler>,
 
     // API (JSON)
     Route<GET,  "/api/completions",                                 CompletionsHandler>,
