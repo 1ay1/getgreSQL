@@ -85,7 +85,47 @@ auto QueryExecHandler::handle(Request& req, AppContext& ctx) -> Response {
         return Response::html(render_to_string<Alert>({error_message(conn.error()), "error"}));
     }
 
+    // Run the query first to check source table info
     auto result = conn->get().exec(sql);
+    bool has_ctid = false;
+
+    // If all result columns come from one table, re-run with ctid prepended
+    // This enables in-place editing for simple SELECT queries
+    if (result && result->col_count() > 0 && result->row_count() > 0) {
+        unsigned int common_oid = result->column_table_oid(0);
+        bool single_table = common_oid != 0;
+        for (int c = 1; c < result->col_count() && single_table; ++c) {
+            auto oid = result->column_table_oid(c);
+            if (oid == 0 || oid != common_oid) single_table = false;
+        }
+        if (single_table) {
+            // All columns from one table — we can add ctid
+            // Resolve table name for the ctid query
+            auto oid_q = pg::sql::query()
+                .raw("SELECT n.nspname||'.'||quote_ident(c.relname) FROM pg_class c "
+                     "JOIN pg_namespace n ON n.oid=c.relnamespace WHERE c.oid=")
+                .val(std::to_string(common_oid)).build();
+            auto oid_r = conn->get().exec(oid_q);
+            if (oid_r && oid_r->row_count() > 0) {
+                auto fqn = std::string(oid_r->get(0, 0));
+                // Build: SELECT ctid, col1, col2, ... FROM schema.table WHERE (original conditions)
+                // Simplification: use the SQL as-is but replace SELECT with SELECT ctid,
+                auto upper = sql;
+                // Find SELECT keyword (case-insensitive)
+                std::string lower_sql = sql;
+                for (auto& ch : lower_sql) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+                auto sel_pos = lower_sql.find("select");
+                if (sel_pos != std::string::npos) {
+                    auto ctid_sql = sql.substr(0, sel_pos + 6) + " ctid," + sql.substr(sel_pos + 6);
+                    auto ctid_result = conn->get().exec(ctid_sql);
+                    if (ctid_result && ctid_result->col_count() > 1) {
+                        result = std::move(ctid_result);
+                        has_ctid = true;
+                    }
+                }
+            }
+        }
+    }
     auto elapsed = std::chrono::steady_clock::now() - start;
     auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
 
@@ -98,34 +138,44 @@ auto QueryExecHandler::handle(Request& req, AppContext& ctx) -> Response {
     auto h = Html::with_capacity(16384);
 
     if (result->row_count() > 0 || result->col_count() > 0) {
+        int col_start = has_ctid ? 1 : 0;  // skip ctid column in output
+
+        // Build columns with source table OIDs from PQftable
         std::vector<DCol> cols;
-        for (int c = 0; c < result->col_count(); ++c) {
-            cols.push_back({result->column_name(c)});
+        for (int c = col_start; c < result->col_count(); ++c) {
+            cols.push_back({
+                .name = result->column_name(c),
+                .table_oid = result->column_table_oid(c),
+            });
         }
 
-        // Type-state: ReadOnly view — editable_row() would be a compile error here
-        auto view = DataView::readonly(h, {.row_count = result->row_count(), .exec_ms = static_cast<int>(ms)});
+        auto view = DataView::readonly(h, {
+            .row_count = result->row_count(),
+            .exec_ms = static_cast<int>(ms),
+            .db = "postgres",  // TODO: get from context
+        });
         view.columns(cols);
 
         for (auto row : *result) {
+            // Get ctid for this row (column 0 if has_ctid)
+            auto ctid = has_ctid ? std::string_view(row[0]) : std::string_view("");
+
             std::vector<Cell> cells;
-            for (int c = 0; c < row.col_count(); ++c) {
+            for (int c = col_start; c < row.col_count(); ++c) {
                 if (row.is_null(c)) {
                     cells.push_back({.is_null = true});
                 } else {
                     cells.push_back({.value = std::string(row[c])});
                 }
             }
-            view.row(cells);
+            view.row(cells, ctid);
         }
-        // RAII: view destructor closes tags
     } else {
         auto affected = std::string(result->affected_rows());
         auto view = DataView::readonly(h, {
             .row_count = affected.empty() ? 0 : std::stoi(affected),
             .exec_ms = static_cast<int>(ms),
             .command_tag = result->command_tag()});
-        // RAII: immediate close for command results (no rows)
     }
 
     return Response::html(std::move(h).finish());

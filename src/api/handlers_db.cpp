@@ -755,25 +755,7 @@ auto TableBrowseHandler::handle(Request& req, AppContext& ctx) -> Response {
         });
         view.columns(cols);
 
-        // Inject insert form fields via inline script
-        {
-            auto insert_h = Html::with_capacity(2048);
-            for (int c = 1; c < result->col_count(); ++c) {
-                auto col_name = std::string(result->column_name(c));
-                insert_h.raw("<div class=\"insert-field\"><label>").text(col_name)
-                 .raw("</label><input type=\"text\" name=\"col_").raw(std::to_string(c - 1))
-                 .raw("\" placeholder=\"").text(col_name).raw("\" class=\"insert-input\"></div>");
-            }
-            h.raw("<script>document.querySelector('#dv-insert-fields').innerHTML = '");
-            auto fields_html = std::move(insert_h).finish();
-            for (char ch : fields_html) {
-                if (ch == '\'') h.raw("\\'");
-                else if (ch == '\\') h.raw("\\\\");
-                else if (ch == '\n') h.raw("\\n");
-                else h.raw(ch);
-            }
-            h.raw("';</script>");
-        }
+        // Insert form fields are now rendered by columns() in the SSR component
 
         for (auto row : *result) {
             auto ctid = std::string(row[0]);
@@ -784,9 +766,8 @@ auto TableBrowseHandler::handle(Request& req, AppContext& ctx) -> Response {
                 if (row.is_null(c)) cells.push_back({.is_null = true});
                 else cells.push_back({.value = std::string(row[c])});
             }
-            view.editable_row(ctid, row_num, cols, cells, db_name, schema_name, table_name);
+            view.row(cells, ctid, row_num);
         }
-        // RAII: view destructor closes tags
     }
 
     return Response::html(std::move(h).finish());

@@ -57,6 +57,7 @@ struct ReadOnlyOpts {
     int row_count = 0;
     int exec_ms = 0;
     std::string_view command_tag;  // non-empty for INSERT/UPDATE/DELETE results
+    std::string_view db;           // for htmx edit URLs on query result cells
 };
 
 struct EditableOpts {
@@ -77,6 +78,7 @@ struct DCol {
     std::string_view name;
     std::string_view type_hint = "";  // "numeric", "text", "boolean", "json", "date"
     bool sortable = true;
+    unsigned int table_oid = 0;       // source table OID (0 = computed expression)
 };
 
 // ── Cell value ──────────────────────────────────────────────────────
@@ -92,22 +94,47 @@ template<DataViewMode Mode>
 class DataViewScope {
     Html& h_;
     bool ended_ = false;
+    std::vector<DCol> cols_;         // stored for row rendering (source OIDs)
+    std::string_view db_;            // for htmx edit URLs
+    std::string_view schema_;        // for insert form (Editable only)
+    std::string_view table_;         // for insert form (Editable only)
 
     // Private: only DataView::readonly / DataView::editable can construct
     struct Key {};
     friend struct DataView;
 
 public:
-    DataViewScope(Key, Html& h) : h_(h) {}
+    DataViewScope(Key, Html& h, std::string_view db = "",
+                  std::string_view schema = "", std::string_view table = "")
+        : h_(h), db_(db), schema_(schema), table_(table) {}
     ~DataViewScope() { if (!ended_) close(); }
 
-    DataViewScope(DataViewScope&& o) noexcept : h_(o.h_), ended_(o.ended_) { o.ended_ = true; }
+    DataViewScope(DataViewScope&& o) noexcept : h_(o.h_), ended_(o.ended_), cols_(std::move(o.cols_)), db_(o.db_), schema_(o.schema_), table_(o.table_) { o.ended_ = true; }
     DataViewScope(const DataViewScope&) = delete;
     DataViewScope& operator=(const DataViewScope&) = delete;
     DataViewScope& operator=(DataViewScope&&) = delete;
 
-    // ── columns: renders thead ──────────────────────────────────
+    // ── columns: renders insert form (Editable) + thead ────────
     auto columns(const std::vector<DCol>& cols) -> void {
+        cols_ = cols;
+
+        // Editable: render insert form now that we have column names
+        if constexpr (std::same_as<Mode, Editable>) {
+            h_.raw("<div class=\"dv-insert-form\" style=\"display:none\">"
+                  "<form hx-post=\"/db/").raw(db_).raw("/schema/").raw(schema_)
+             .raw("/table/").raw(table_).raw("/insert-row\" hx-target=\"#tab-content\" hx-swap=\"innerHTML\">"
+                  "<div class=\"insert-form-grid\">");
+            for (std::size_t ci = 0; ci < cols.size(); ++ci) {
+                h_.raw("<div class=\"insert-field\"><label>").text(cols[ci].name)
+                 .raw("</label><input type=\"text\" name=\"col_").raw(std::to_string(ci))
+                 .raw("\" placeholder=\"").text(cols[ci].name).raw("\" class=\"insert-input\"></div>");
+            }
+            h_.raw("</div><div class=\"insert-actions\">"
+                  "<button type=\"submit\" class=\"btn btn-sm btn-primary\">Insert</button>"
+                  "<button type=\"button\" class=\"btn btn-sm\" data-dv-action=\"toggle-insert\">Cancel</button>"
+                  "</div></form></div>\n");
+        }
+
         bool with_row_num = std::same_as<Mode, Editable>;
         bool with_actions = std::same_as<Mode, Editable>;
 
@@ -123,64 +150,95 @@ public:
         h_.raw("</tr></thead><tbody>");
     }
 
-    // ── row: read-only row — only available on ReadOnly ─────────
-    auto row(const std::vector<Cell>& cells) -> void
-        requires std::same_as<Mode, ReadOnly>
-    {
-        h_.raw("<tr>");
-        for (auto& cell : cells) {
-            h_.raw("<td>");
-            if (cell.is_null) {
-                h_.raw("<span class=\"null-value\">NULL</span>");
-            } else if (cell.value.size() > 200) {
-                h_.raw("<span class=\"dv-cell\">");
-                h_.text(std::string_view(cell.value).substr(0, 200));
-                h_.raw("&hellip;</span>");
-            } else {
-                h_.raw("<span class=\"dv-cell\">").text(cell.value).raw("</span>");
-            }
-            h_.raw("</td>");
-        }
-        h_.raw("</tr>\n");
-    }
+    // ── row: unified cell rendering for BOTH modes ──────────────
+    // Every cell with a known source (table_oid != 0) + ctid gets
+    // htmx double-click-to-edit. Saves go directly to the DB.
+    // This is the same for query results AND table browse.
+    auto row(const std::vector<Cell>& cells, std::string_view ctid = "",
+             int row_num = 0) -> void {
+        h_.raw("<tr");
+        if (!ctid.empty()) h_.raw(" data-ctid=\"").text(ctid).raw("\"");
+        h_.raw(">");
 
-    // ── editable_row: only available on Editable ────────────────
-    auto editable_row(std::string_view ctid, int row_num,
-                      const std::vector<DCol>& cols,
-                      const std::vector<Cell>& cells,
-                      std::string_view db, std::string_view schema,
-                      std::string_view table) -> void
-        requires std::same_as<Mode, Editable>
-    {
-        h_.raw("<tr data-ctid=\"").text(ctid).raw("\">");
-        h_.raw("<td class=\"row-num\">").raw(std::to_string(row_num)).raw("</td>");
+        // Row number column (Editable mode only)
+        if constexpr (std::same_as<Mode, Editable>) {
+            h_.raw("<td class=\"row-num\">").raw(std::to_string(row_num)).raw("</td>");
+        }
 
         for (std::size_t i = 0; i < cells.size(); ++i) {
             auto& cell = cells[i];
-            auto col_name = (i < cols.size()) ? cols[i].name : std::string_view("");
+            auto col_name = (i < cols_.size()) ? cols_[i].name : std::string_view("");
+            auto has_source = (i < cols_.size() && cols_[i].table_oid != 0);
+            bool can_edit = !ctid.empty() && has_source;
+            // For Editable mode, all columns are editable (table_oid is the table itself)
+            if constexpr (std::same_as<Mode, Editable>) { can_edit = !ctid.empty(); }
+
             h_.raw("<td>");
-            if (cell.is_null) {
-                h_.raw("<span class=\"null-value editable-cell\" data-col=\"").text(col_name)
-                 .raw("\" data-ctid=\"").text(ctid).raw("\">NULL</span>");
-            } else if (cell.value.size() > 80) {
-                h_.raw("<span class=\"editable-cell dv-cell-long\" data-col=\"").text(col_name)
-                 .raw("\" data-ctid=\"").text(ctid).raw("\" data-full=\"").text(cell.value).raw("\">");
-                h_.text(std::string_view(cell.value).substr(0, 60));
-                h_.raw("&hellip;</span>");
+            if (can_edit) {
+                render_editable_cell(cell, col_name, ctid, i);
             } else {
-                h_.raw("<span class=\"editable-cell\" data-col=\"").text(col_name)
-                 .raw("\" data-ctid=\"").text(ctid).raw("\">").text(cell.value).raw("</span>");
+                render_readonly_cell(cell);
             }
             h_.raw("</td>");
         }
 
-        // Delete button
-        h_.raw("<td class=\"dv-actions\"><button class=\"btn btn-sm btn-danger\" "
-              "hx-post=\"/db/").raw(db).raw("/schema/").raw(schema).raw("/table/").raw(table)
-         .raw("/delete-row\" hx-vals='{\"ctid\":\"").text(ctid)
-         .raw("\"}' hx-target=\"#tab-content\" hx-swap=\"innerHTML\" "
-              "hx-confirm=\"Delete this row?\">&#10005;</button></td>");
+        // Actions column (Editable mode only)
+        if constexpr (std::same_as<Mode, Editable>) {
+            h_.raw("<td class=\"dv-actions\"><button class=\"btn btn-sm btn-danger\" "
+                  "hx-post=\"/db/").raw(db_).raw("/schema/").raw(schema_).raw("/table/").raw(table_)
+             .raw("/delete-row\" hx-vals='{\"ctid\":\"").text(ctid)
+             .raw("\"}' hx-target=\"#tab-content\" hx-swap=\"innerHTML\" "
+                  "hx-confirm=\"Delete this row?\">&#10005;</button></td>");
+        }
+
         h_.raw("</tr>\n");
+    }
+
+private:
+    // ── Render an editable cell with htmx double-click trigger ──
+    auto render_editable_cell(const Cell& cell, std::string_view col_name,
+                              std::string_view ctid, std::size_t col_idx) -> void {
+        auto oid_str = (col_idx < cols_.size()) ? std::to_string(cols_[col_idx].table_oid) : std::string("0");
+        auto val = cell.is_null ? std::string_view("") : std::string_view(cell.value);
+
+        if (cell.is_null) {
+            h_.raw("<span class=\"null-value editable-cell\" data-col=\"").text(col_name).raw("\"");
+        } else {
+            bool is_long = cell.value.size() > 80;
+            h_.raw("<span class=\"editable-cell");
+            if (is_long) h_.raw(" dv-cell-long");
+            h_.raw("\" data-col=\"").text(col_name).raw("\"");
+            if (is_long) h_.raw(" data-full=\"").text(cell.value).raw("\"");
+        }
+
+        // htmx: double-click → server returns inline edit form
+        h_.raw(" hx-get=\"/dv/edit-cell?db=").text(db_)
+         .raw("&schema=").text(schema_).raw("&table=").text(table_)
+         .raw("&table_oid=").raw(oid_str)
+         .raw("&col=").text(col_name)
+         .raw("&ctid=").text(ctid)
+         .raw("&val=").text(val)
+         .raw("\" hx-trigger=\"dblclick\" hx-target=\"closest td\" hx-swap=\"innerHTML\">");
+
+        if (cell.is_null) {
+            h_.raw("NULL</span>");
+        } else if (cell.value.size() > 80) {
+            h_.text(std::string_view(cell.value).substr(0, 60)).raw("&hellip;</span>");
+        } else {
+            h_.text(cell.value).raw("</span>");
+        }
+    }
+
+    // ── Render a plain read-only cell (no source table) ─────────
+    auto render_readonly_cell(const Cell& cell) -> void {
+        if (cell.is_null) {
+            h_.raw("<span class=\"null-value dv-cell\">NULL</span>");
+        } else if (cell.value.size() > 200) {
+            h_.raw("<span class=\"dv-cell dv-cell-long\" data-full=\"").text(cell.value).raw("\">");
+            h_.text(std::string_view(cell.value).substr(0, 200)).raw("&hellip;</span>");
+        } else {
+            h_.raw("<span class=\"dv-cell\">").text(cell.value).raw("</span>");
+        }
     }
 
 private:
@@ -199,7 +257,7 @@ struct DataView {
         h.raw("<div class=\"data-view\">\n");
         render_info_bar(h, o.row_count, o.exec_ms, o.command_tag);
         render_toolbar(h, false, {}, {}, {}, 0, 0, 0, {});
-        return DataViewScope<ReadOnly>(DataViewScope<ReadOnly>::Key{}, h);
+        return DataViewScope<ReadOnly>(DataViewScope<ReadOnly>::Key{}, h, o.db);
     }
 
     // ── Editable factory ────────────────────────────────────────
@@ -209,8 +267,8 @@ struct DataView {
          .raw("\" data-table=\"").text(o.table).raw("\">\n");
         render_info_bar(h, o.row_count, 0, {}, o.page, o.limit, o.total_rows);
         render_toolbar(h, true, o.db, o.schema, o.table, o.page, o.limit, o.total_rows, o.base_url);
-        render_insert_form(h, o.db, o.schema, o.table);
-        return DataViewScope<Editable>(DataViewScope<Editable>::Key{}, h);
+        // Insert form is rendered in columns() after column names are known
+        return DataViewScope<Editable>(DataViewScope<Editable>::Key{}, h, o.db, o.schema, o.table);
     }
 
 private:
@@ -284,11 +342,18 @@ private:
     }
 
     static auto render_insert_form(Html& h, std::string_view db,
-                                   std::string_view schema, std::string_view table) -> void {
+                                   std::string_view schema, std::string_view table,
+                                   const std::vector<DCol>& cols) -> void {
         h.raw("<div class=\"dv-insert-form\" style=\"display:none\">"
               "<form hx-post=\"/db/").raw(db).raw("/schema/").raw(schema)
          .raw("/table/").raw(table).raw("/insert-row\" hx-target=\"#tab-content\" hx-swap=\"innerHTML\">"
-              "<div class=\"insert-form-grid\" id=\"dv-insert-fields\"></div>"
+              "<div class=\"insert-form-grid\">");
+        for (std::size_t i = 0; i < cols.size(); ++i) {
+            h.raw("<div class=\"insert-field\"><label>").text(cols[i].name)
+             .raw("</label><input type=\"text\" name=\"col_").raw(std::to_string(i))
+             .raw("\" placeholder=\"").text(cols[i].name).raw("\" class=\"insert-input\"></div>");
+        }
+        h.raw("</div>"
               "<div class=\"insert-actions\">"
               "<button type=\"submit\" class=\"btn btn-sm btn-primary\">Insert</button>"
               "<button type=\"button\" class=\"btn btn-sm\" data-dv-action=\"toggle-insert\">Cancel</button>"
