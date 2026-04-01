@@ -25,7 +25,7 @@ namespace getgresql::ssr {
 struct TreeNode {
     static auto expandable(Html& h, std::string_view icon_class, std::string_view label,
                            std::string_view children_url, int depth, std::string_view badge_text = "") -> void {
-        h.raw("<li class=\"tree-item\"><div class=\"tree-row\" style=\"--tree-depth:")
+        h.raw("<li class=\"tree-item\"><div class=\"tree-row\" tabindex=\"0\" style=\"--tree-depth:")
          .raw(std::to_string(depth)).raw("\" onclick=\"treeToggle(this)\">");
         h.raw("<span class=\"tree-chevron\">&#9656;</span>");
         h.raw("<span class=\"tree-icon ").raw(icon_class).raw("\">").raw(icon_char(icon_class)).raw("</span>");

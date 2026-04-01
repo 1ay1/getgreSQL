@@ -563,7 +563,23 @@ pre code {
     grid-template-columns: 0px 1fr;
 }
 .ide.sidebar-collapsed .sidebar {
-    display: none;
+    width: 0;
+    min-width: 0;
+    opacity: 0;
+    pointer-events: none;
+    overflow: hidden;
+    border-right: none;
+    transition: width 0.2s ease, opacity 0.15s ease, min-width 0.2s ease;
+}
+/* Smooth transition for expand too */
+.sidebar {
+    transition: width 0.2s ease, opacity 0.15s ease, min-width 0.2s ease;
+}
+.ide.sidebar-collapsed {
+    transition: grid-template-columns 0.2s ease;
+}
+.ide {
+    transition: grid-template-columns 0.2s ease;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════

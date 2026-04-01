@@ -201,6 +201,15 @@ document.addEventListener('htmx:afterSettle', function() {
     treeHighlightCurrent();
 });
 
+// ─── Sidebar: Ctrl+B toggle ──────────────────────────────────────────────
+
+document.addEventListener('keydown', function(e) {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'b') {
+        e.preventDefault();
+        toggleSidebar();
+    }
+});
+
 // ─── Sidebar: Filter, Refresh, Collapse ──────────────────────────────────
 
 function sidebarCollapseAll() {
@@ -251,6 +260,52 @@ function sidebarRefresh() {
         });
     });
 })();
+
+// ─── Sidebar: Keyboard Navigation ────────────────────────────────────────
+
+document.addEventListener('keydown', function(e) {
+    var sidebar = document.querySelector('.sidebar-tree');
+    if (!sidebar || !sidebar.contains(document.activeElement)) return;
+    var rows = Array.from(sidebar.querySelectorAll('.tree-row'));
+    var visible = rows.filter(function(r) {
+        var li = r.closest('.tree-item');
+        if (!li) return true;
+        var parent = li.parentElement;
+        if (parent && parent.classList.contains('tree-children') && parent.style.display === 'none') return false;
+        return r.offsetParent !== null;
+    });
+    var idx = visible.indexOf(document.activeElement);
+    if (idx === -1) return;
+
+    if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (idx + 1 < visible.length) visible[idx + 1].focus();
+    } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (idx > 0) visible[idx - 1].focus();
+    } else if (e.key === 'ArrowRight') {
+        // Expand
+        var children = document.activeElement.closest('.tree-item');
+        if (children) {
+            var ch = children.querySelector('.tree-children');
+            if (ch && ch.style.display === 'none') {
+                document.activeElement.click();
+            }
+        }
+    } else if (e.key === 'ArrowLeft') {
+        // Collapse
+        var item = document.activeElement.closest('.tree-item');
+        if (item) {
+            var ch = item.querySelector('.tree-children');
+            if (ch && ch.style.display !== 'none' && ch.classList.contains('loaded')) {
+                document.activeElement.click();
+            }
+        }
+    } else if (e.key === 'Enter') {
+        e.preventDefault();
+        document.activeElement.click();
+    }
+});
 
 // ─── Section Tab Clicks ──────────────────────────────────────────────────
 // Handles data-tab-url tabs via fetch — more reliable than hx-* attributes

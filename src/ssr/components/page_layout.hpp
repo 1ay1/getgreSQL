@@ -86,10 +86,11 @@ private:
               "    <div class=\"sidebar-actions\">\n"
               "      <button class=\"sidebar-icon\" onclick=\"sidebarRefresh()\" title=\"Refresh\">&#8635;</button>\n"
               "      <button class=\"sidebar-icon\" onclick=\"sidebarCollapseAll()\" title=\"Collapse All\">&#8722;</button>\n"
+              "      <button class=\"sidebar-icon\" onclick=\"toggleSidebar()\" title=\"Hide Sidebar (Ctrl+B)\">&#10005;</button>\n"
               "    </div>\n  </div>\n"
               "  <div class=\"sidebar-search\">\n"
               "    <input type=\"text\" class=\"sidebar-search-input\" id=\"sidebar-filter\" "
-              "placeholder=\"Filter objects...\" autocomplete=\"off\">\n"
+              "placeholder=\"Filter... (type to search)\" autocomplete=\"off\">\n"
               "  </div>\n"
               "  <div class=\"sidebar-tree\" id=\"sidebar-tree\" hx-get=\"/tree\" hx-trigger=\"load\" hx-swap=\"innerHTML\">\n"
               "    <div class=\"loading\">Loading...</div>\n"
@@ -103,6 +104,7 @@ private:
               "  <span class=\"status-item\" id=\"status-info\"></span>\n"
               "  <span class=\"status-spacer\"></span>\n"
               "  <span class=\"status-item\"><a href=\"/connections\" style=\"color:inherit;text-decoration:none\">&#128268; Connections</a></span>\n"
+              "  <span class=\"status-item\"><kbd>Ctrl+B</kbd> Sidebar</span>\n"
               "  <span class=\"status-item\"><kbd>Ctrl+K</kbd> Command Palette</span>\n"
               "</footer>\n");
     }

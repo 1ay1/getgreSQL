@@ -300,11 +300,11 @@ struct LayoutCSS {
     cursor: pointer;
     color: var(--text-1);
     font-size: var(--font-size-xs);
-    transition: background 0.08s ease, color 0.08s ease;
-    min-height: 28px;
+    transition: background 0.1s ease, color 0.1s ease, padding-left 0.15s ease;
+    min-height: 26px;
     gap: 5px;
     text-decoration: none;
-    margin: 1px var(--sp-1);
+    margin: 0 var(--sp-1);
     border-radius: var(--radius);
     position: relative;
 }
@@ -314,6 +314,10 @@ struct LayoutCSS {
 }
 .tree-row:active {
     background: var(--bg-3);
+}
+.tree-row:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
 }
 .tree-row.selected {
     background: var(--accent-subtle);
@@ -409,11 +413,10 @@ struct LayoutCSS {
     flex-shrink: 0;
     background: var(--bg-2);
     border-radius: 3px;
-    opacity: 0;
-    transition: opacity 0.15s;
+    opacity: 0.6;
+    transition: opacity 0.15s, color 0.15s;
 }
-.tree-row:hover .tree-badge { opacity: 1; }
-/* Always show badge on selected rows */
+.tree-row:hover .tree-badge { opacity: 1; color: var(--text-2); }
 .tree-row.selected .tree-badge { opacity: 0.8; }
 
 .tree-group-label {
