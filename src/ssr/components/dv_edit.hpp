@@ -182,7 +182,9 @@ struct DvLineagePanel {
     };
 
     struct ForeignKey { std::string name; std::string definition; };
+    struct ReverseForeignKey { std::string name; std::string source_table; std::string definition; };
     struct Index { std::string definition; };
+    struct Trigger { std::string name; std::string definition; };
 
     struct Props {
         std::string_view col;
@@ -190,12 +192,19 @@ struct DvLineagePanel {
         bool has_source = false;
         SourceInfo source;
         std::vector<ForeignKey> fks;
+        std::vector<ReverseForeignKey> reverse_fks;
         std::vector<Index> indexes;
+        std::vector<Trigger> triggers;
+        std::vector<std::string> dependent_views;
+        std::string xmin;
+        std::string xmin_age;
+        std::string last_modified;  // commit timestamp (if track_commit_timestamp=on)
     };
 
     static auto render(const Props& p, Html& h) -> void {
         h.raw("<div class=\"dv-lineage-panel\">");
-        h.raw("<div class=\"dv-lineage-header\">Cell Lineage"
+        h.raw("<div class=\"dv-lineage-header\">"
+              "<span>&#128269; Explain This</span>"
               "<button onclick=\"this.closest('.dv-lineage-panel').remove()\" "
               "class=\"dv-lineage-close\">&times;</button></div>");
 
@@ -224,11 +233,20 @@ struct DvLineagePanel {
             // Stats
             section(h, "Table Stats", s.table_size + " &middot; ~" + s.approx_rows + " rows");
 
-            // Foreign keys
+            // Foreign keys (outgoing joins)
             if (!p.fks.empty()) {
                 auto fk_html = std::string();
                 for (auto& fk : p.fks) fk_html += "<div><code>" + fk.name + "</code>: " + fk.definition + "</div>";
-                section(h, "Foreign Keys", fk_html);
+                section(h, "Joins &rarr; (FK references)", fk_html);
+            }
+
+            // Reverse foreign keys (incoming joins)
+            if (!p.reverse_fks.empty()) {
+                auto rfk_html = std::string();
+                for (auto& rfk : p.reverse_fks) {
+                    rfk_html += "<div><code>" + rfk.source_table + "</code> via <code>" + rfk.name + "</code></div>";
+                }
+                section(h, "Joins &larr; (referenced by)", rfk_html);
             }
 
             // Indexes
@@ -236,6 +254,29 @@ struct DvLineagePanel {
                 auto idx_html = std::string();
                 for (auto& idx : p.indexes) idx_html += "<div><code>" + idx.definition + "</code></div>";
                 section(h, "Indexes", idx_html);
+            }
+
+            // Triggers (transformations)
+            if (!p.triggers.empty()) {
+                auto trig_html = std::string();
+                for (auto& t : p.triggers) trig_html += "<div><code>" + t.name + "</code>: " + t.definition + "</div>";
+                section(h, "Transformations (Triggers)", trig_html);
+            }
+
+            // Dependent views
+            if (!p.dependent_views.empty()) {
+                auto dep_html = std::string();
+                for (auto& v : p.dependent_views) dep_html += "<div><code>" + v + "</code></div>";
+                section(h, "Used By (Views)", dep_html);
+            }
+
+            // Last modified
+            if (!p.xmin.empty()) {
+                auto mod_html = std::string("<div>txid: <code>") + p.xmin + "</code> (age " + p.xmin_age + ")</div>";
+                if (!p.last_modified.empty()) {
+                    mod_html += "<div>changed: <code>" + p.last_modified + "</code></div>";
+                }
+                section(h, "Last Modified", mod_html);
             }
         }
 

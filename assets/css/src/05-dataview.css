@@ -517,6 +517,22 @@ tr.dv-row-selected td {
     color: var(--text-3);
 }
 
+/* ─── Explain This popover ────────────────────────────────────────────── */
+
+.dv-lineage-popover {
+    pointer-events: auto;
+}
+.dv-lineage-popover .dv-lineage-panel {
+    max-height: 80vh;
+    overflow-y: auto;
+}
+
+/* Right-click hint on cell hover */
+.editable-cell:hover,
+.dv-cell:hover {
+    cursor: context-menu;
+}
+
 /* Inline edit form inside cell */
 .dv-edit-form {
     display: contents;

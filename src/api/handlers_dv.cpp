@@ -136,6 +136,7 @@ auto DvExplainCellHandler::handle(Request& req, AppContext& ctx) -> Response {
     auto table_oid = std::string(req.query("table_oid"));
     auto col = std::string(req.query("col"));
     auto val = std::string(req.query("val"));
+    auto ctid = std::string(req.query("ctid"));
 
     auto conn = ctx.pool.checkout();
     if (!conn) return Response::html(render_to_string<Alert>({"Connection failed", "error"}));
@@ -185,7 +186,7 @@ auto DvExplainCellHandler::handle(Request& req, AppContext& ctx) -> Response {
         .col_default = std::string(info->get(0, 9)),
     };
 
-    // Foreign keys
+    // Foreign keys (outgoing: this table references others)
     auto fk_q = pg::sql::query()
         .raw("SELECT conname, pg_get_constraintdef(oid) FROM pg_constraint "
              "WHERE conrelid = ").val(table_oid)
@@ -194,6 +195,24 @@ auto DvExplainCellHandler::handle(Request& req, AppContext& ctx) -> Response {
     if (auto fks = conn->get().exec(fk_q); fks) {
         for (auto fk : *fks) {
             props.fks.push_back({std::string(fk[0]), std::string(fk[1])});
+        }
+    }
+
+    // Reverse foreign keys (incoming: other tables reference this one)
+    auto rfk_q = pg::sql::query()
+        .raw("SELECT c.conname, rn.nspname||'.'||rc.relname, "
+             "pg_get_constraintdef(c.oid) "
+             "FROM pg_constraint c "
+             "JOIN pg_class rc ON rc.oid = c.conrelid "
+             "JOIN pg_namespace rn ON rn.oid = rc.relnamespace "
+             "WHERE c.confrelid = ").val(table_oid)
+        .raw(" AND c.contype = 'f' ORDER BY rn.nspname, rc.relname LIMIT 20")
+        .build();
+    if (auto rfks = conn->get().exec(rfk_q); rfks) {
+        for (auto rfk : *rfks) {
+            props.reverse_fks.push_back({
+                std::string(rfk[0]), std::string(rfk[1]), std::string(rfk[2])
+            });
         }
     }
 
@@ -207,6 +226,57 @@ auto DvExplainCellHandler::handle(Request& req, AppContext& ctx) -> Response {
     if (auto idxs = conn->get().exec(idx_q); idxs) {
         for (auto idx : *idxs) {
             props.indexes.push_back({std::string(idx[0])});
+        }
+    }
+
+    // Triggers on this table
+    auto trig_q = pg::sql::query()
+        .raw("SELECT tgname, pg_get_triggerdef(t.oid, true) "
+             "FROM pg_trigger t WHERE t.tgrelid = ").val(table_oid)
+        .raw(" AND NOT t.tgisinternal ORDER BY tgname LIMIT 10")
+        .build();
+    if (auto trigs = conn->get().exec(trig_q); trigs) {
+        for (auto trig : *trigs) {
+            props.triggers.push_back({std::string(trig[0]), std::string(trig[1])});
+        }
+    }
+
+    // Dependent views that reference this table
+    auto dep_q = pg::sql::query()
+        .raw("SELECT DISTINCT dn.nspname||'.'||dc.relname "
+             "FROM pg_depend d "
+             "JOIN pg_rewrite r ON r.oid = d.objid "
+             "JOIN pg_class dc ON dc.oid = r.ev_class "
+             "JOIN pg_namespace dn ON dn.oid = dc.relnamespace "
+             "WHERE d.refclassid = 'pg_class'::regclass "
+             "AND d.refobjid = ").val(table_oid)
+        .raw(" AND dc.relkind = 'v' AND dc.oid != ").val(table_oid)
+        .raw(" ORDER BY 1 LIMIT 15")
+        .build();
+    if (auto deps = conn->get().exec(dep_q); deps) {
+        for (auto dep : *deps) {
+            props.dependent_views.push_back(std::string(dep[0]));
+        }
+    }
+
+    // Row modification info via xmin (if ctid provided)
+    if (!ctid.empty() && !props.source.schema.empty()) {
+        auto xmin_q = pg::sql::query()
+            .raw("SELECT xmin, age(xmin) FROM ")
+            .id(props.source.schema, props.source.table)
+            .raw(" WHERE ctid = ").val(ctid)
+            .build();
+        if (auto xmin_r = conn->get().exec(xmin_q); xmin_r && xmin_r->row_count() > 0) {
+            props.xmin = std::string(xmin_r->get(0, 0));
+            props.xmin_age = std::string(xmin_r->get(0, 1));
+
+            // Try to get commit timestamp (requires track_commit_timestamp = on)
+            auto ts_q = pg::sql::query()
+                .raw("SELECT pg_xact_commit_timestamp(").raw(props.xmin).raw(")")
+                .build();
+            if (auto ts_r = conn->get().exec(ts_q); ts_r && ts_r->row_count() > 0 && !ts_r->is_null(0, 0)) {
+                props.last_modified = std::string(ts_r->get(0, 0));
+            }
         }
     }
 

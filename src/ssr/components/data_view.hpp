@@ -230,6 +230,9 @@ private:
             if (is_long) h_.raw(" data-full=\"").text(cell.value).raw("\"");
         }
 
+        // Explain-this: data attrs for lineage popover
+        h_.raw(" data-table-oid=\"").raw(oid_str).raw("\"");
+
         // htmx: double-click → server returns inline edit form
         // URL-encode parameters to handle UTF-8, spaces, special chars
         h_.raw(" hx-get=\"/dv/edit-cell?db=").raw(detail::url_encode(db_))

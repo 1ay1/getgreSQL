@@ -45,20 +45,48 @@
             var colName = editableSpan ? editableSpan.getAttribute('data-col') : colLabel;
 
             // ── Edit actions — same for ALL data views ─────────────
-            var canEdit = editableSpan && editableSpan.hasAttribute('hx-get');
+            // Any cell with data-col is editable (rendered by SSR with htmx triggers)
+            var targetSpan = editableSpan || cell.querySelector('[data-col]');
+            var canEdit = targetSpan && (targetSpan.hasAttribute('hx-get') || targetSpan.classList.contains('editable-cell'));
             if (canEdit) {
                 items.push({
                     label: 'Edit Cell',
                     icon: '&#9998;',
                     kbd: 'F2',
-                    action: function() { htmx.trigger(editableSpan, 'dblclick'); }
+                    action: function() {
+                        if (targetSpan.hasAttribute('hx-get')) {
+                            htmx.trigger(targetSpan, 'dblclick');
+                        } else {
+                            startEdit(targetSpan);
+                        }
+                    }
                 });
-                if (!isNull) {
+                if (!isNull && ctid) {
                     items.push({
                         label: 'Set NULL',
                         icon: '&#8709;',
                         action: function() {
-                            setToNull(db, schema, tableName, colName, ctid, editableSpan);
+                            setToNull(db, schema, tableName, colName, ctid, targetSpan);
+                        }
+                    });
+                }
+                // Explain This — show cell lineage
+                var tableOid = targetSpan.getAttribute('data-table-oid');
+                if (tableOid) {
+                    items.push({
+                        label: 'Explain This',
+                        icon: '&#128269;',
+                        action: function() {
+                            var url = '/dv/explain-cell?table_oid=' + encodeURIComponent(tableOid) +
+                                '&col=' + encodeURIComponent(colName) + '&val=' + encodeURIComponent(text);
+                            fetch(url, {headers: {'HX-Request': 'true'}})
+                                .then(function(r) { return r.text(); })
+                                .then(function(html) {
+                                    var panel = document.createElement('div');
+                                    panel.style.cssText = 'position:fixed;z-index:10001;top:50%;left:50%;transform:translate(-50%,-50%)';
+                                    panel.innerHTML = html;
+                                    document.body.appendChild(panel);
+                                });
                         }
                     });
                 }

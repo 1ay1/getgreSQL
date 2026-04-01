@@ -5,6 +5,7 @@
 //
 // Interactions:
 //   Click         → select cell
+//   Right-click   → "Explain This" lineage popover
 //   Double-click  → start editing
 //   F2 / Enter    → start editing
 //   Type a key    → start editing with that character
@@ -29,6 +30,79 @@
             deselectCell();
         }
     });
+
+    // ── Right-click → Explain This ───────────────────────────────────
+    document.addEventListener('contextmenu', function(e) {
+        var cell = e.target.closest(CELL_SEL);
+        if (!cell) return;
+
+        e.preventDefault();
+        selectCell(cell);
+
+        // Remove any existing lineage panel
+        var old = document.querySelector('.dv-lineage-popover');
+        if (old) old.remove();
+
+        // Gather cell metadata
+        var tableOid = cell.getAttribute('data-table-oid') || '0';
+        var col = cell.getAttribute('data-col') || getColNameFor(cell);
+        var val = cell.getAttribute('data-full') || cell.textContent;
+        var tr = cell.closest('tr');
+        var ctid = tr ? (tr.getAttribute('data-ctid') || '') : '';
+
+        // Fetch lineage panel from server
+        var url = '/dv/explain-cell?table_oid=' + encodeURIComponent(tableOid) +
+                  '&col=' + encodeURIComponent(col) +
+                  '&val=' + encodeURIComponent(val) +
+                  '&ctid=' + encodeURIComponent(ctid);
+
+        var popover = document.createElement('div');
+        popover.className = 'dv-lineage-popover';
+        popover.innerHTML = '<div class="dv-lineage-panel"><div class="dv-lineage-header">Loading&hellip;</div></div>';
+
+        // Position near the click
+        popover.style.position = 'fixed';
+        popover.style.zIndex = '10000';
+        positionPopover(popover, e.clientX, e.clientY);
+        document.body.appendChild(popover);
+
+        fetch(url).then(function(r) { return r.text(); }).then(function(html) {
+            popover.innerHTML = html;
+            positionPopover(popover, e.clientX, e.clientY);
+        }).catch(function() {
+            popover.innerHTML = '<div class="dv-lineage-panel"><div class="dv-lineage-header">Failed to load</div></div>';
+        });
+
+        // Close on click outside or Escape
+        function closePopover(ev) {
+            if (ev.type === 'keydown' && ev.key !== 'Escape') return;
+            if (ev.type === 'mousedown' && popover.contains(ev.target)) return;
+            popover.remove();
+            document.removeEventListener('mousedown', closePopover);
+            document.removeEventListener('keydown', closePopover);
+        }
+        // Delay so this click doesn't immediately close it
+        setTimeout(function() {
+            document.addEventListener('mousedown', closePopover);
+            document.addEventListener('keydown', closePopover);
+        }, 50);
+    });
+
+    function positionPopover(el, x, y) {
+        var pad = 8;
+        el.style.left = x + 'px';
+        el.style.top = y + 'px';
+        // Adjust if overflowing viewport
+        requestAnimationFrame(function() {
+            var rect = el.getBoundingClientRect();
+            if (rect.right > window.innerWidth - pad) {
+                el.style.left = Math.max(pad, x - rect.width) + 'px';
+            }
+            if (rect.bottom > window.innerHeight - pad) {
+                el.style.top = Math.max(pad, y - rect.height) + 'px';
+            }
+        });
+    }
 
     // ── Double-click to edit ─────────────────────────────────────────
     // Skip cells with hx-get — those are handled by htmx SSR editing
