@@ -46,114 +46,27 @@ auto ConnectionsPageHandler::handle(Request& req, AppContext& ctx) -> Response {
     auto conns = config::load_connections();
     auto current_connstr = ctx.pool.connstr();
 
-    // Get current DB name
     auto conn = ctx.pool.checkout();
     std::string current_db = "unknown";
     if (conn) current_db = std::string(conn->get().dbname());
 
-    auto render_content = [&](Html& out) {
-        out.raw("<div style=\"max-width:720px;margin:0 auto;padding:var(--sp-5)\">");
+    // Build component data
+    std::vector<ConnectionInfo> conn_infos;
+    for (auto& c : conns) {
+        conn_infos.push_back({.name = c.name, .url = c.url, .color = c.color,
+                              .is_active = (c.url == current_connstr)});
+    }
 
-        // Current connection info
-        out.raw("<div class=\"conn-current\">"
-              "<h3>Current Connection</h3>"
-              "<div class=\"conn-info-card\">"
-              "<span class=\"conn-dot-lg\"></span>"
-              "<div><strong>").text(current_db).raw("</strong>"
-              "<div class=\"conn-url\">").text(current_connstr).raw("</div>"
-              "</div></div></div>");
-
-        // Add new connection form
-        out.raw("<div class=\"conn-add-section\">"
-              "<h3>Add Connection</h3>"
-              "<form hx-post=\"/connections/save\" hx-target=\"#conn-list\" hx-swap=\"innerHTML\">"
-              "<div class=\"conn-form-grid\">"
-              "<div class=\"form-field\">"
-              "<label>Name</label>"
-              "<input type=\"text\" name=\"name\" placeholder=\"Production DB\" required class=\"form-input\">"
-              "</div>"
-              "<div class=\"form-field\">"
-              "<label>Connection URL</label>"
-              "<input type=\"text\" name=\"url\" placeholder=\"postgresql://user:pass@host/db\" required class=\"form-input\">"
-              "</div>"
-              "<div class=\"form-field\">"
-              "<label>Color</label>"
-              "<select name=\"color\" class=\"form-input\">"
-              "<option value=\"\">Default</option>"
-              "<option value=\"#3b82f6\">Blue</option>"
-              "<option value=\"#10b981\">Green</option>"
-              "<option value=\"#f59e0b\">Amber</option>"
-              "<option value=\"#ef4444\">Red</option>"
-              "<option value=\"#8b5cf6\">Purple</option>"
-              "<option value=\"#ec4899\">Pink</option>"
-              "</select>"
-              "</div>"
-              "</div>"
-              "<div class=\"conn-form-actions\">"
-              "<button type=\"button\" class=\"btn btn-sm\" hx-post=\"/connections/test\" "
-              "hx-include=\"closest form\" hx-target=\"#test-result\" hx-swap=\"innerHTML\">Test</button>"
-              "<button type=\"submit\" class=\"btn btn-sm btn-primary\">Save Connection</button>"
-              "</div>"
-              "<div id=\"test-result\"></div>"
-              "</form></div>");
-
-        // Saved connections list
-        out.raw("<div class=\"conn-saved-section\">"
-              "<h3>Saved Connections</h3>"
-              "<div id=\"conn-list\">");
-        render_connection_list(out, conns, current_connstr);
-        out.raw("</div></div>");
-
-        out.raw("</div>");
+    auto render_content = [&](Html& h) {
+        ConnectionsPage::render({
+            .current_db = current_db,
+            .current_url = current_connstr,
+            .connections = conn_infos,
+        }, h);
     };
 
-    if (req.is_htmx()) {
-        auto out = Html::with_capacity(8192);
-        render_content(out);
-        return Response::html(std::move(out).finish());
-    }
+    if (req.is_htmx()) return Response::html(render_partial(render_content));
     return Response::html(render_page("Connections", "Connections", render_content));
-}
-
-auto ConnectionsPageHandler::render_connection_list(Html& h,
-    const std::vector<config::SavedConnection>& conns,
-    std::string_view current_connstr) -> void {
-
-    if (conns.empty()) {
-        h.raw("<div class=\"empty-state\"><div class=\"empty-icon\">&#128268;</div>"
-              "<p>No saved connections. Add one above.</p></div>");
-        return;
-    }
-
-    for (auto& c : conns) {
-        bool is_active = (c.url == current_connstr);
-        h.raw("<div class=\"conn-item");
-        if (is_active) h.raw(" conn-active");
-        h.raw("\"");
-        if (!c.color.empty()) {
-            h.raw(" style=\"border-left: 3px solid ").raw(c.color).raw("\"");
-        }
-        h.raw(">");
-        h.raw("<div class=\"conn-item-info\">"
-              "<strong>").text(c.name).raw("</strong>");
-        if (is_active) h.raw(" <span class=\"badge badge-success\">active</span>");
-        h.raw("<div class=\"conn-url\">").text(c.url).raw("</div>"
-              "</div>"
-              "<div class=\"conn-item-actions\">");
-        if (!is_active) {
-            h.raw("<button class=\"btn btn-sm btn-primary\" "
-                  "hx-post=\"/connections/switch\" "
-                  "hx-vals='{\"name\":\"").text(c.name).raw("\"}' "
-                  "hx-confirm=\"Switch to ").text(c.name).raw("?\" "
-                  "hx-target=\"body\">Switch</button>");
-        }
-        h.raw("<button class=\"btn btn-sm btn-danger\" "
-              "hx-post=\"/connections/delete\" "
-              "hx-vals='{\"name\":\"").text(c.name).raw("\"}' "
-              "hx-target=\"#conn-list\" hx-swap=\"innerHTML\" "
-              "hx-confirm=\"Delete ").text(c.name).raw("?\">Delete</button>");
-        h.raw("</div></div>\n");
-    }
 }
 
 // ─── ConnectionSaveHandler ──────────────────────────────────────────
@@ -173,10 +86,12 @@ auto ConnectionSaveHandler::handle(Request& req, AppContext& ctx) -> Response {
         return Response::html(render_to_string<Alert>({error_message(result.error()), "error"}));
     }
 
-    // Re-render the connection list
+    // Re-render the connection list via SSR component
     auto conns = config::load_connections();
+    std::vector<ConnectionInfo> infos;
+    for (auto& c : conns) infos.push_back({c.name, c.url, c.color, c.url == ctx.pool.connstr()});
     auto h = Html::with_capacity(4096);
-    ConnectionsPageHandler::render_connection_list(h, conns, ctx.pool.connstr());
+    ConnectionsPage::render_list(infos, ctx.pool.connstr(), h);
     return Response::html(std::move(h).finish());
 }
 
@@ -193,8 +108,10 @@ auto ConnectionDeleteHandler::handle(Request& req, AppContext& ctx) -> Response 
     config::remove_connection(name);
 
     auto conns = config::load_connections();
+    std::vector<ConnectionInfo> infos;
+    for (auto& c : conns) infos.push_back({c.name, c.url, c.color, c.url == ctx.pool.connstr()});
     auto h = Html::with_capacity(4096);
-    ConnectionsPageHandler::render_connection_list(h, conns, ctx.pool.connstr());
+    ConnectionsPage::render_list(infos, ctx.pool.connstr(), h);
     return Response::html(std::move(h).finish());
 }
 

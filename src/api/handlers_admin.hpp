@@ -37,7 +37,7 @@ struct UnusedIndexesHandler {
 };
 
 // POST /admin/drop-index — drop a specific index
-struct DropIndexHandler {
+struct UnusedIndexDropHandler {
     static auto handle(Request& req, AppContext& ctx) -> Response;
 };
 

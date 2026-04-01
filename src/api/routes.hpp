@@ -81,7 +81,7 @@ using AppRoutes = RouteTable<
 
     // Admin tools
     Route<GET,  "/admin/unused-indexes",                            UnusedIndexesHandler>,
-    Route<POST, "/admin/drop-index",                                DropIndexHandler>,
+    Route<POST, "/admin/drop-index",                                UnusedIndexDropHandler>,
     Route<GET,  "/admin/permissions",                               PermissionsHandler>,
 
     // Monitoring

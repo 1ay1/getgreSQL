@@ -76,6 +76,15 @@ auto IndexHandler::handle(Request& req, AppContext& /*ctx*/) -> Response {
     return Response::html(render_page("Dashboard", "Dashboard", render));
 }
 
+// Convert pg::HealthCheck vector to SSR component data
+static auto to_health_data(const std::vector<pg::HealthCheck>& checks) -> std::vector<HealthCheckData> {
+    std::vector<HealthCheckData> data;
+    for (auto& c : checks) {
+        data.push_back({c.name, c.status, c.value, c.detail, c.fix_action, c.fix_label});
+    }
+    return data;
+}
+
 auto DashboardHealthHandler::handle(Request& /*req*/, AppContext& ctx) -> Response {
     using namespace ssr;
     auto conn = ctx.pool.checkout();
@@ -84,42 +93,7 @@ auto DashboardHealthHandler::handle(Request& /*req*/, AppContext& ctx) -> Respon
         auto checks = pg::health_checks(conn->get());
         if (!checks) return render_to_string<Alert>(Alert::Props{error_message(checks.error()), "error"});
         auto h = Html::with_capacity(4096);
-        // Status ribbon — compact, glanceable
-        int ok_count = 0, warn_count = 0, crit_count = 0;
-        for (auto& c : *checks) {
-            if (c.status == "ok") ok_count++;
-            else if (c.status == "warning") warn_count++;
-            else crit_count++;
-        }
-        auto overall = crit_count > 0 ? "critical" : warn_count > 0 ? "degraded" : "healthy";
-        auto overall_cls = crit_count > 0 ? "danger" : warn_count > 0 ? "warning" : "success";
-        h.raw("<div class=\"dash-hero\">");
-        h.raw("<div class=\"dash-hero-status dash-hero-").raw(overall_cls).raw("\">");
-        h.raw("<div class=\"dash-hero-pulse\"></div>");
-        h.raw("<span class=\"dash-hero-dot\"></span>");
-        h.raw("<span class=\"dash-hero-label\">System ").raw(overall).raw("</span>");
-        h.raw("</div>");
-        // Mini check indicators
-        h.raw("<div class=\"dash-checks\">");
-        for (auto& c : *checks) {
-            auto v = (c.status == "ok") ? "success" : (c.status == "warning") ? "warning" : "danger";
-            auto icon = (c.status == "ok") ? "&#10003;" : (c.status == "warning") ? "&#9888;" : "&#10007;";
-            h.raw("<div class=\"dash-check dash-check-").raw(v).raw("\" title=\"")
-             .text(c.name).raw(": ").text(c.detail).raw("\">");
-            h.raw("<span class=\"dash-check-icon\">").raw(icon).raw("</span>");
-            h.raw("<span class=\"dash-check-name\">").text(c.name).raw("</span>");
-            h.raw("<span class=\"dash-check-val\">").text(c.value).raw("</span>");
-            if (!c.fix_action.empty() && c.status != "ok") {
-                h.raw("<button class=\"dash-fix-btn\" "
-                      "hx-post=\"/dashboard/fix\" "
-                      "hx-vals='{\"action\":\"").raw(c.fix_action).raw("\"}' "
-                      "hx-target=\"#dash-health\" hx-swap=\"innerHTML\" "
-                      "hx-confirm=\"").text(c.fix_label).raw(" — are you sure?\">"
-                      ).text(c.fix_label).raw("</button>");
-            }
-            h.raw("</div>");
-        }
-        h.raw("</div></div>");
+        DashboardHealthRibbon::render({.checks = to_health_data(*checks)}, h);
         return std::move(h).finish();
     }));
 }
@@ -529,49 +503,15 @@ auto DashboardFixHandler::handle(Request& req, AppContext& ctx) -> Response {
     auto checks = pg::health_checks(conn->get());
     auto h = Html::with_capacity(4096);
 
-    // Success toast
-    h.raw("<div class=\"dash-fix-toast\">").text(result_msg).raw("</div>");
-
     if (!checks) {
         Alert::render({error_message(checks.error()), "error"}, h);
         return Response::html(std::move(h).finish());
     }
 
-    // Re-render the health ribbon (same as DashboardHealthHandler)
-    int ok_count = 0, warn_count = 0, crit_count = 0;
-    for (auto& c : *checks) {
-        if (c.status == "ok") ok_count++;
-        else if (c.status == "warning") warn_count++;
-        else crit_count++;
-    }
-    auto overall = crit_count > 0 ? "critical" : warn_count > 0 ? "degraded" : "healthy";
-    auto overall_cls = crit_count > 0 ? "danger" : warn_count > 0 ? "warning" : "success";
-    h.raw("<div class=\"dash-hero\">");
-    h.raw("<div class=\"dash-hero-status dash-hero-").raw(overall_cls).raw("\">");
-    h.raw("<div class=\"dash-hero-pulse\"></div>");
-    h.raw("<span class=\"dash-hero-dot\"></span>");
-    h.raw("<span class=\"dash-hero-label\">System ").raw(overall).raw("</span>");
-    h.raw("</div>");
-    h.raw("<div class=\"dash-checks\">");
-    for (auto& c : *checks) {
-        auto v = (c.status == "ok") ? "success" : (c.status == "warning") ? "warning" : "danger";
-        auto icon = (c.status == "ok") ? "&#10003;" : (c.status == "warning") ? "&#9888;" : "&#10007;";
-        h.raw("<div class=\"dash-check dash-check-").raw(v).raw("\" title=\"")
-         .text(c.name).raw(": ").text(c.detail).raw("\">");
-        h.raw("<span class=\"dash-check-icon\">").raw(icon).raw("</span>");
-        h.raw("<span class=\"dash-check-name\">").text(c.name).raw("</span>");
-        h.raw("<span class=\"dash-check-val\">").text(c.value).raw("</span>");
-        if (!c.fix_action.empty() && c.status != "ok") {
-            h.raw("<button class=\"dash-fix-btn\" "
-                  "hx-post=\"/dashboard/fix\" "
-                  "hx-vals='{\"action\":\"").raw(c.fix_action).raw("\"}' "
-                  "hx-target=\"#dash-health\" hx-swap=\"innerHTML\" "
-                  "hx-confirm=\"").text(c.fix_label).raw(" — are you sure?\">"
-                  ).text(c.fix_label).raw("</button>");
-        }
-        h.raw("</div>");
-    }
-    h.raw("</div></div>");
+    DashboardHealthRibbon::render({
+        .checks = to_health_data(*checks),
+        .toast_message = result_msg,
+    }, h);
     return Response::html(std::move(h).finish());
 }
 

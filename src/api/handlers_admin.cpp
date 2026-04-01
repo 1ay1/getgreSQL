@@ -627,66 +627,32 @@ auto UnusedIndexesHandler::handle(Request& req, AppContext& ctx) -> Response {
         "ORDER BY pg_relation_size(s.indexrelid) DESC"
     );
 
-    auto render = [&](Html& h) {
-        h.raw("<div style=\"max-width:960px;margin:0 auto;padding:var(--sp-5)\">");
-        h.raw("<div class=\"settings-toolbar\" style=\"margin-bottom:var(--sp-4)\">");
-        h.raw("<h3 style=\"margin:0\">Unused Indexes</h3>");
-        h.raw("<span style=\"color:var(--text-3);font-size:var(--font-size-xs)\">Indexes with zero scans (excluding primary keys and unique constraints)</span>");
-        h.raw("</div>");
-
-        if (!result || result->row_count() == 0) {
-            h.raw("<div class=\"empty-state\"><div class=\"empty-icon\">&#9889;</div>"
-                  "<p>No unused indexes found. Your database is well-optimized.</p></div>");
-        } else {
-            long long total_waste = 0;
-            for (int r = 0; r < result->row_count(); ++r) {
-                if (!result->is_null(r, 4)) total_waste += std::stoll(std::string(result->get(r, 4)));
-            }
-
-            h.raw("<div class=\"query-info\" style=\"margin-bottom:var(--sp-3)\">"
-                  "<span class=\"rows-badge\">").raw(std::to_string(result->row_count()))
-             .raw(" unused indexes</span>"
-                  "<span class=\"time-badge\">Wasting ").raw(
-                      total_waste >= 1048576 ? std::format("{:.1f} MB", total_waste / 1048576.0) :
-                      std::format("{:.1f} KB", total_waste / 1024.0)
-                  ).raw("</span></div>");
-
-            Table::begin(h, {
-                {"Schema", "", true}, {"Table", "", true}, {"Index", "", true},
-                {"Size", "num", true}, {"Definition", "", false}, {"", "", false}
+    // Build data for the component
+    std::vector<UnusedIndex> indexes;
+    if (result) {
+        for (int r = 0; r < result->row_count(); ++r) {
+            indexes.push_back({
+                .schema = std::string(result->get(r, 0)),
+                .table = std::string(result->get(r, 1)),
+                .index = std::string(result->get(r, 2)),
+                .size = std::string(result->get(r, 3)),
+                .size_bytes = result->get_int(r, 4).value_or(0),
+                .definition = std::string(result->get(r, 8)),
             });
-            for (int r = 0; r < result->row_count(); ++r) {
-                auto schema = std::string(result->get(r, 0));
-                auto table = std::string(result->get(r, 1));
-                auto index = std::string(result->get(r, 2));
-                auto size = std::string(result->get(r, 3));
-                auto def = std::string(result->get(r, 8));
-                auto def_short = def.size() > 60 ? def.substr(0, 60) + "..." : def;
-
-                auto drop_btn = std::format(
-                    "<button class=\"btn btn-sm btn-danger\" "
-                    "hx-post=\"/admin/drop-index\" "
-                    "hx-vals='{{\"schema\":\"{}\",\"index\":\"{}\"}}' "
-                    "hx-target=\"closest tr\" hx-swap=\"outerHTML\" "
-                    "hx-confirm=\"DROP INDEX {}.{}?\">Drop</button>",
-                    schema, index, schema, index);
-
-                Table::row(h, {{schema, table, index, size,
-                    "<code title=\"" + def + "\">" + def_short + "</code>",
-                    drop_btn}});
-            }
-            Table::end(h);
         }
-        h.raw("</div>");
+    }
+
+    auto render = [&](Html& h) {
+        UnusedIndexPage::render({.indexes = indexes}, h);
     };
 
     if (req.is_htmx()) return Response::html(render_partial(render));
     return Response::html(render_page("Unused Indexes", "Dashboard", render));
 }
 
-// ─── DropIndexHandler ──────────────────────────────────────────────
+// ─── UnusedIndexDropHandler ──────────────────────────────────────────────
 
-auto DropIndexHandler::handle(Request& req, AppContext& ctx) -> Response {
+auto UnusedIndexDropHandler::handle(Request& req, AppContext& ctx) -> Response {
     auto body = std::string(req.body());
     // Parse JSON body from hx-vals
     auto extract = [&](std::string_view key) -> std::string {
@@ -744,51 +710,32 @@ auto PermissionsHandler::handle(Request& req, AppContext& ctx) -> Response {
         "ORDER BY m.rolname, r.rolname"
     );
 
-    auto render = [&](Html& h) {
-        h.raw("<div style=\"max-width:960px;margin:0 auto;padding:var(--sp-5)\">");
-        h.raw("<h3>Permission Audit</h3>");
-
-        // Role memberships
-        if (memberships && memberships->row_count() > 0) {
-            h.raw("<div class=\"dashboard-section\" style=\"margin-bottom:var(--sp-4)\">");
-            h.raw("<div class=\"dashboard-section-header\">Role Memberships</div>");
-            h.raw("<div class=\"dashboard-section-body\">");
-            Table::begin(h, {{"Role", "", true}, {"Member Of", "", true}});
-            for (int r = 0; r < memberships->row_count(); ++r) {
-                Table::row(h, {{std::string(memberships->get(r, 0)), std::string(memberships->get(r, 1))}});
-            }
-            Table::end(h);
-            h.raw("</div></div>");
-        }
-
-        // Table permissions
-        if (!perms || perms->row_count() == 0) {
-            h.raw("<div class=\"empty-state\"><p>No custom table permissions found</p></div>");
-        } else {
-            h.raw("<div class=\"dashboard-section\">");
-            h.raw("<div class=\"dashboard-section-header\">Table Permissions"
-                  "<span class=\"badge\" style=\"margin-left:var(--sp-2)\">").raw(std::to_string(perms->row_count())).raw(" grants</span></div>");
-            h.raw("<div class=\"dashboard-section-body\">");
-            Table::begin(h, {
-                {"Role", "", true}, {"Schema", "", true}, {"Table", "", true},
-                {"Privilege", "", true}, {"Grantable", "", true}
+    // Build data for the component
+    std::vector<RoleMembership> membership_data;
+    if (memberships) {
+        for (int r = 0; r < memberships->row_count(); ++r) {
+            membership_data.push_back({
+                .role = std::string(memberships->get(r, 0)),
+                .member_of = std::string(memberships->get(r, 1)),
             });
-            for (int r = 0; r < perms->row_count(); ++r) {
-                auto grantable = std::string(perms->get(r, 4));
-                auto cls = grantable == "YES" ? " class=\"badge badge-success\"" : "";
-                Table::row(h, {{
-                    std::string(perms->get(r, 0)),
-                    std::string(perms->get(r, 1)),
-                    std::string(perms->get(r, 2)),
-                    std::string(perms->get(r, 3)),
-                    grantable == "YES" ? "<span class=\"badge badge-success\">YES</span>" : "NO"
-                }});
-            }
-            Table::end(h);
-            h.raw("</div></div>");
         }
+    }
 
-        h.raw("</div>");
+    std::vector<PermissionGrant> grant_data;
+    if (perms) {
+        for (int r = 0; r < perms->row_count(); ++r) {
+            grant_data.push_back({
+                .grantee = std::string(perms->get(r, 0)),
+                .schema = std::string(perms->get(r, 1)),
+                .table = std::string(perms->get(r, 2)),
+                .privilege = std::string(perms->get(r, 3)),
+                .is_grantable = std::string(perms->get(r, 4)) == "YES",
+            });
+        }
+    }
+
+    auto render = [&](Html& h) {
+        PermissionAuditPage::render({.memberships = membership_data, .grants = grant_data}, h);
     };
 
     if (req.is_htmx()) return Response::html(render_partial(render));

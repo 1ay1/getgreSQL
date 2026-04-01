@@ -243,37 +243,11 @@ auto QueryRowsHandler::handle(Request& req, AppContext& /*ctx*/) -> Response {
     bool has_ctid = cached->has_ctid;
     int end = std::min(offset + limit, total);
 
-    // Render row batch as HTML <tr> elements
+    // Render row batch via SSR component
     auto h = Html::with_capacity(static_cast<std::size_t>((end - offset) * 256));
 
     for (int r = offset; r < end; ++r) {
-        auto ctid = has_ctid ? std::string_view(res.get(r, 0)) : std::string_view("");
-        h.raw("<tr");
-        if (!ctid.empty()) h.raw(" data-ctid=\"").text(ctid).raw("\"");
-        h.raw(">");
-
-        for (int c = col_start; c < res.col_count(); ++c) {
-            h.raw("<td>");
-            if (res.is_null(r, c)) {
-                h.raw("<span class=\"null-value dv-cell\">NULL</span>");
-            } else {
-                auto val = res.get(r, c);
-                h.raw("<span class=\"dv-cell\"");
-                auto col_name = res.column_name(c);
-                if (!col_name.empty()) h.raw(" data-col=\"").text(col_name).raw("\"");
-                auto table_oid = res.column_table_oid(c);
-                if (table_oid != 0) h.raw(" data-table-oid=\"").raw(std::to_string(table_oid)).raw("\"");
-                if (val.size() > 80) {
-                    h.raw(" data-full=\"").text(val).raw("\" class=\"dv-cell dv-cell-long\">");
-                    h.text(val.substr(0, 60)).raw("&hellip;");
-                } else {
-                    h.raw(">").text(val);
-                }
-                h.raw("</span>");
-            }
-            h.raw("</td>");
-        }
-        h.raw("</tr>\n");
+        QueryRowBatch::render_row(h, col_start, res.col_count(), res, r, has_ctid);
     }
 
     // Wrap in JSON with metadata
@@ -442,25 +416,11 @@ auto ExplainExecHandler::handle(Request& req, AppContext& ctx) -> Response {
     }
 
     if (!hints.empty()) {
-        h.raw("<div class=\"explain-hints\">");
-        h.raw("<div class=\"explain-hints-header\">&#128161; Index Suggestions</div>");
+        std::vector<IndexHint> hint_data;
         for (auto& [tbl, col] : hints) {
-            h.raw("<div class=\"explain-hint-item\">");
-            if (col.empty()) {
-                h.raw("<span class=\"explain-hint-text\">Sequential scan on <strong>").text(tbl)
-                 .raw("</strong> — consider adding an index if this table is queried with WHERE conditions</span>");
-            } else {
-                auto idx_name = tbl + "_" + col + "_idx";
-                auto create_sql = "CREATE INDEX CONCURRENTLY " + idx_name + " ON " + tbl + " (" + col + ");";
-                h.raw("<span class=\"explain-hint-text\">Sequential scan on <strong>").text(tbl)
-                 .raw("</strong> filtered by <code>").text(col).raw("</code></span>");
-                h.raw("<button class=\"btn btn-sm btn-ghost\" onclick=\"navigator.clipboard.writeText('")
-                 .raw(create_sql).raw("'); this.textContent='Copied!'\" title=\"").text(create_sql)
-                 .raw("\">Copy CREATE INDEX</button>");
-            }
-            h.raw("</div>");
+            hint_data.push_back({.table = tbl, .column = col});
         }
-        h.raw("</div>");
+        ExplainHints::render({.hints = hint_data}, h);
     }
 
     return Response::html(std::move(h).finish());
