@@ -455,38 +455,7 @@ tr.dv-row-selected td {
 }
 
 
-/* ─── Explain This Button (appears on cell select) ───────────────────── */
-
-.cell-explain-btn {
-    position: fixed;
-    z-index: 100;
-    width: 20px;
-    height: 20px;
-    padding: 0;
-    border: 1px solid var(--accent-dim);
-    border-radius: 50%;
-    background: var(--accent-dim);
-    color: #fff;
-    font-size: 0.6rem;
-    font-weight: 700;
-    font-style: italic;
-    font-family: Georgia, serif;
-    line-height: 18px;
-    text-align: center;
-    cursor: pointer;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.3);
-    transition: transform 0.1s, box-shadow 0.1s, background 0.1s;
-    opacity: 0.85;
-}
-.cell-explain-btn:hover {
-    background: var(--accent);
-    border-color: var(--accent);
-    box-shadow: 0 2px 8px rgba(56,139,253,0.4);
-    transform: scale(1.15);
-    opacity: 1;
-}
-
-/* ─── Cell Lineage Panel (Explain This) ──────────────────────────────── */
+/* ─── Cell Lineage Panel (Explain This — right-click or Ctrl+I) ──────── */
 
 .dv-lineage-panel {
     background: var(--bg-1);
@@ -990,12 +959,6 @@ P._init = function() {
         self._syncHtmx(e);
     });
 
-    // Reposition explain button when table scrolls
-    this.wrapper.addEventListener('scroll', function() {
-        if (self.cursor && window._dvExplainBtn && window._dvExplainBtn.style.display !== 'none') {
-            self._posExplain();
-        }
-    }, { passive: true });
 };
 
 // ─── Column Extraction ──────────────────────────────────────────────
@@ -1791,47 +1754,8 @@ P._updateCount = function() {
 
 // ─── Explain Button ─────────────────────────────────────────────────
 
-P._posExplain = function() {
-    var btn = window._dvExplainBtn;
-    if (!this.cursor) {
-        if (btn) btn.style.display = 'none';
-        return;
-    }
-    var span = this._getCellSpan(this.cursor.vr, this.cursor.c);
-    if (!span) {
-        if (btn) btn.style.display = 'none';
-        return;
-    }
-    if (!btn) {
-        btn = document.createElement('button');
-        btn.className = 'cell-explain-btn';
-        btn.textContent = 'i';
-        btn.title = 'Explain This (Ctrl+I)';
-        document.body.appendChild(btn);
-        window._dvExplainBtn = btn;
-        btn.addEventListener('mousedown', function(e) {
-            e.preventDefault(); e.stopPropagation();
-            if (activeGrid && activeGrid.cursor) {
-                var s = activeGrid._getCellSpan(activeGrid.cursor.vr, activeGrid.cursor.c);
-                if (s && typeof explainCell === 'function') explainCell(s);
-            }
-        });
-    }
-    var td = span.closest('td');
-    if (!td) { btn.style.display = 'none'; return; }
-    var rect = td.getBoundingClientRect();
-    // Hide if cell scrolled out of the scroll container
-    var wr = this.wrapper.getBoundingClientRect();
-    if (rect.top < wr.top || rect.bottom > wr.bottom) {
-        btn.style.display = 'none';
-        return;
-    }
-    btn.style.display = '';
-    btn.style.position = 'fixed';
-    btn.style.top = (rect.top + 4) + 'px';
-    btn.style.left = (rect.right - 26) + 'px';
-    btn.style.transform = 'none';
-};
+// Explain This: triggered by right-click menu or Ctrl+I. No floating button.
+P._posExplain = function() {};
 
 // ─── htmx Sync ──────────────────────────────────────────────────────
 
