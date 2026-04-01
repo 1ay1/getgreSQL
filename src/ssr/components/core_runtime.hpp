@@ -65,7 +65,7 @@ function toggleTheme() {
     overlay.className = 'theme-picker-overlay';
     var picker = document.createElement('div');
     picker.className = 'theme-picker';
-    picker.innerHTML = '<div class="theme-picker-header">Choose Theme</div>';
+    picker.innerHTML = '<div class="theme-picker-header"><span>Choose Theme</span><button class="theme-picker-close" onclick="closeThemePicker()">&times;</button></div>';
 
     var grid = document.createElement('div');
     grid.className = 'theme-picker-grid';

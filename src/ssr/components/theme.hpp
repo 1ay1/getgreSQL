@@ -106,6 +106,24 @@ struct Theme {
     font-weight: 600;
     border-bottom: 1px solid var(--border-subtle);
     color: var(--text-0);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.theme-picker-close {
+    background: none;
+    border: none;
+    color: var(--text-3);
+    font-size: 1.2rem;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: var(--radius);
+    line-height: 1;
+}
+.theme-picker-close:hover {
+    color: var(--text-0);
+    background: var(--bg-3);
 }
 
 .theme-picker-grid {

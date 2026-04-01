@@ -6,21 +6,15 @@ namespace getgresql::ssr {
 
 struct DashboardCSS {
     static constexpr auto css() -> std::string_view { return R"_CSS_(
-/* HealthCard: co-located in health_card.hpp */
 
-/* ═══════════════════════════════════════════════════════════════════════
-   UX Polish — Final Pass
-   ═══════════════════════════════════════════════════════════════════════ */
-
-
-/* ─── Dashboard Hero ──────────────────────────────────────────────────── */
+/* ─── Dashboard Hero (Health Ribbon) ─────────────────────────────────── */
 
 .dash-hero {
     display: flex;
     align-items: center;
     gap: var(--sp-5);
     padding: var(--sp-4) var(--sp-5);
-    background: linear-gradient(135deg, var(--bg-1) 0%, var(--bg-2) 100%);
+    background: var(--bg-1);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-lg);
     margin-bottom: var(--sp-4);
@@ -93,7 +87,7 @@ struct DashboardCSS {
     border-radius: var(--radius);
     font-size: var(--font-size-xs);
     font-family: var(--font-mono);
-    background: var(--bg-1);
+    background: var(--bg-2);
     border: 1px solid var(--border-subtle);
     transition: all var(--transition-fast);
     cursor: default;
@@ -110,9 +104,7 @@ struct DashboardCSS {
 .dash-check-name { color: var(--text-2); }
 .dash-check-val { color: var(--text-0); font-weight: 600; }
 
-/* ─── Dashboard Server Bar ───────────────────────────────────────────── */
-
-/* ─── Dashboard Two-Column Row ───────────────────────────────────────── */
+/* ─── Dashboard Layout ──────────────────────────────────────────────── */
 
 .dash-row {
     display: grid;
@@ -123,6 +115,8 @@ struct DashboardCSS {
 @media (max-width: 900px) {
     .dash-row { grid-template-columns: 1fr; }
 }
+
+/* ─── Server Info Bar ───────────────────────────────────────────────── */
 
 .dash-server {
     padding: var(--sp-3) var(--sp-5);
@@ -149,11 +143,12 @@ struct DashboardCSS {
 .dash-server-version {
     font-family: var(--font-mono);
     font-size: var(--font-size-xs);
-    color: var(--text-2);
-    background: var(--bg-2);
+    color: var(--accent);
+    background: var(--accent-subtle);
     padding: var(--sp-1) var(--sp-3);
     border-radius: var(--radius);
-    border: 1px solid var(--border-subtle);
+    border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent);
+    font-weight: 600;
 }
 .dash-server-uptime {
     font-size: var(--font-size-xs);
@@ -166,11 +161,11 @@ struct DashboardCSS {
     color: var(--text-4);
 }
 
-/* ─── Dashboard Metric Cards ─────────────────────────────────────────── */
+/* ─── Metric Cards ──────────────────────────────────────────────────── */
 
 .dash-metrics {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
     gap: var(--sp-4);
     margin-bottom: var(--sp-4);
 }
@@ -185,22 +180,38 @@ struct DashboardCSS {
     align-items: center;
     gap: var(--sp-2);
     transition: border-color var(--transition-normal), transform var(--transition-normal), box-shadow var(--transition-normal);
-    box-shadow: var(--shadow-sm);
-    animation: dash-card-in 0.4s ease-out both;
+    animation: dash-card-in 0.5s ease-out both;
+    position: relative;
+    overflow: hidden;
 }
+.dash-metric-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--accent), transparent);
+    opacity: 0;
+    transition: opacity var(--transition-normal);
+}
+.dash-metric-card:hover::before { opacity: 1; }
+
 .dash-metric-card:nth-child(1) { animation-delay: 0s; }
-.dash-metric-card:nth-child(2) { animation-delay: 0.08s; }
-.dash-metric-card:nth-child(3) { animation-delay: 0.16s; }
+.dash-metric-card:nth-child(2) { animation-delay: 0.1s; }
+.dash-metric-card:nth-child(3) { animation-delay: 0.2s; }
+.dash-metric-card:nth-child(4) { animation-delay: 0.3s; }
 @keyframes dash-card-in {
-    from { opacity: 0; transform: translateY(12px); }
-    to { opacity: 1; transform: translateY(0); }
+    from { opacity: 0; transform: translateY(16px) scale(0.97); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
 }
 .dash-metric-card:hover {
     border-color: color-mix(in srgb, var(--accent) 40%, transparent);
-    transform: translateY(-2px);
-    box-shadow: var(--shadow-md), 0 0 20px rgba(56, 139, 253, 0.06);
+    transform: translateY(-3px);
+    box-shadow: var(--shadow-md), 0 0 30px color-mix(in srgb, var(--accent) 8%, transparent);
 }
 
+/* Ring gauges */
 .dash-ring-container {
     position: relative;
     width: 120px;
@@ -212,7 +223,7 @@ struct DashboardCSS {
     transform: rotate(-90deg);
 }
 .dash-ring-fill {
-    transition: stroke-dasharray 1s ease-out;
+    transition: stroke-dasharray 1.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .dash-ring-label {
     position: absolute;
@@ -250,6 +261,11 @@ struct DashboardCSS {
     color: var(--text-3);
     font-family: var(--font-mono);
 }
+.dash-metric-item {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
 .dash-metric-warn { color: var(--warning); }
 
 .dash-dot {
@@ -268,7 +284,7 @@ struct DashboardCSS {
     text-align: center;
 }
 .dash-big-num {
-    font-size: 2.2rem;
+    font-size: 2rem;
     font-weight: 800;
     font-family: var(--font-mono);
     color: var(--text-0);
@@ -284,7 +300,51 @@ struct DashboardCSS {
     letter-spacing: 0.08em;
 }
 
-/* ─── Dashboard Activity Summary ──────────────────────────────────────── */
+/* ─── Dashboard Section Cards ───────────────────────────────────────── */
+
+.dashboard-section {
+    background: var(--bg-1);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    animation: dash-card-in 0.5s ease-out both;
+}
+
+.dashboard-section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-3);
+    padding: var(--sp-3) var(--sp-4);
+    font-weight: 700;
+    font-size: var(--font-size-sm);
+    color: var(--text-1);
+    border-bottom: 1px solid var(--border-subtle);
+    background: var(--bg-2);
+}
+
+.dashboard-section-body {
+    padding: var(--sp-3);
+}
+
+/* Live pulse dot — auto-shown on sections with hx polling */
+[hx-trigger*="every"] .dashboard-section-header::before {
+    content: '';
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--success);
+    margin-right: var(--sp-2);
+    animation: dash-live-pulse 2s ease-in-out infinite;
+    box-shadow: 0 0 6px rgba(63, 185, 80, 0.4);
+}
+@keyframes dash-live-pulse {
+    0%, 100% { opacity: 1; box-shadow: 0 0 6px rgba(63, 185, 80, 0.4); }
+    50% { opacity: 0.5; box-shadow: 0 0 2px rgba(63, 185, 80, 0.2); }
+}
+
+/* ─── Activity Feed ─────────────────────────────────────────────────── */
 
 .dash-activity-summary {
     display: flex;
@@ -301,8 +361,6 @@ struct DashboardCSS {
 .dash-ab-active { background: rgba(63, 185, 80, 0.12); color: var(--success); }
 .dash-ab-idle { background: var(--bg-2); color: var(--text-3); }
 .dash-ab-warn { background: rgba(210, 153, 34, 0.12); color: var(--warning); }
-
-/* ─── Dashboard Activity Feed ────────────────────────────────────────── */
 
 .dash-activity-list {
     display: flex;
@@ -356,9 +414,7 @@ struct DashboardCSS {
     max-width: 100%;
 }
 
-/* ─── Dashboard Bar Chart ────────────────────────────────────────────── */
-
-/* ─── Dashboard Bar Chart — table layout for perfect alignment ────────── */
+/* ─── Bar Chart (Top Tables) ────────────────────────────────────────── */
 
 .dash-bar-chart {
     display: table;
@@ -368,20 +424,20 @@ struct DashboardCSS {
 .dash-bar-row {
     display: table-row;
     font-size: var(--font-size-xs);
-    animation: dash-bar-in 0.4s ease-out both;
+    animation: dash-bar-in 0.5s ease-out both;
 }
-.dash-bar-row:nth-child(1) { animation-delay: 0s; }
-.dash-bar-row:nth-child(2) { animation-delay: 0.03s; }
-.dash-bar-row:nth-child(3) { animation-delay: 0.06s; }
-.dash-bar-row:nth-child(4) { animation-delay: 0.09s; }
-.dash-bar-row:nth-child(5) { animation-delay: 0.12s; }
-.dash-bar-row:nth-child(6) { animation-delay: 0.15s; }
-.dash-bar-row:nth-child(7) { animation-delay: 0.18s; }
-.dash-bar-row:nth-child(8) { animation-delay: 0.21s; }
-.dash-bar-row:nth-child(9) { animation-delay: 0.24s; }
-.dash-bar-row:nth-child(10) { animation-delay: 0.27s; }
+.dash-bar-row:nth-child(1)  { animation-delay: 0s; }
+.dash-bar-row:nth-child(2)  { animation-delay: 0.04s; }
+.dash-bar-row:nth-child(3)  { animation-delay: 0.08s; }
+.dash-bar-row:nth-child(4)  { animation-delay: 0.12s; }
+.dash-bar-row:nth-child(5)  { animation-delay: 0.16s; }
+.dash-bar-row:nth-child(6)  { animation-delay: 0.20s; }
+.dash-bar-row:nth-child(7)  { animation-delay: 0.24s; }
+.dash-bar-row:nth-child(8)  { animation-delay: 0.28s; }
+.dash-bar-row:nth-child(9)  { animation-delay: 0.32s; }
+.dash-bar-row:nth-child(10) { animation-delay: 0.36s; }
 @keyframes dash-bar-in {
-    from { opacity: 0; transform: translateX(-6px); }
+    from { opacity: 0; transform: translateX(-8px); }
     to { opacity: 1; transform: translateX(0); }
 }
 
@@ -394,7 +450,7 @@ struct DashboardCSS {
 .dash-bar-name {
     font-family: var(--font-mono);
     white-space: nowrap;
-    width: 1%; /* shrink-to-fit */
+    width: 1%;
     padding-right: var(--sp-4);
 }
 .dash-bar-name a {
@@ -405,23 +461,25 @@ struct DashboardCSS {
 .dash-bar-name a:hover { color: var(--accent); }
 
 .dash-bar-track {
-    width: 100%; /* takes remaining space */
+    width: 100%;
     padding: 0 var(--sp-3);
 }
-.dash-bar-track > div { /* the inner track container */
-    height: 6px;
+.dash-bar-track > div {
+    height: 8px;
     background: var(--bg-3);
-    border-radius: 3px;
+    border-radius: 4px;
     overflow: hidden;
 }
 .dash-bar-fill {
     height: 100%;
-    background: var(--accent);
-    border-radius: 3px;
-    transition: width 0.8s ease-out;
-    min-width: 2px;
+    background: linear-gradient(90deg, var(--accent-dim), var(--accent));
+    border-radius: 4px;
+    transition: width 1s cubic-bezier(0.4, 0, 0.2, 1);
+    min-width: 3px;
 }
-.dash-bar-fill.dash-bar-warn { background: var(--warning); }
+.dash-bar-fill.dash-bar-warn {
+    background: linear-gradient(90deg, var(--warning), color-mix(in srgb, var(--warning) 70%, var(--danger)));
+}
 
 .dash-bar-value {
     font-family: var(--font-mono);
@@ -441,7 +499,7 @@ struct DashboardCSS {
 }
 .dash-bar-dead { color: var(--warning); font-weight: 600; }
 
-/* ─── Dashboard Database Cards ────────────────────────────────────────── */
+/* ─── Database Cards ────────────────────────────────────────────────── */
 
 .dash-db-grid {
     display: grid;
@@ -451,24 +509,38 @@ struct DashboardCSS {
 
 .dash-db-card {
     display: block;
-    background: var(--bg-1);
+    background: var(--bg-0);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-lg);
     padding: var(--sp-3) var(--sp-4);
     text-decoration: none;
     color: inherit;
     transition: all var(--transition-normal);
-    box-shadow: var(--shadow-sm);
-    animation: dash-card-in 0.4s ease-out both;
+    animation: dash-card-in 0.5s ease-out both;
+    position: relative;
+    overflow: hidden;
 }
+.dash-db-card::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent) 40%, var(--success)));
+    opacity: 0;
+    transition: opacity var(--transition-normal);
+}
+.dash-db-card:hover::after { opacity: 1; }
+
 .dash-db-card:nth-child(1) { animation-delay: 0s; }
-.dash-db-card:nth-child(2) { animation-delay: 0.06s; }
-.dash-db-card:nth-child(3) { animation-delay: 0.12s; }
-.dash-db-card:nth-child(4) { animation-delay: 0.18s; }
+.dash-db-card:nth-child(2) { animation-delay: 0.08s; }
+.dash-db-card:nth-child(3) { animation-delay: 0.16s; }
+.dash-db-card:nth-child(4) { animation-delay: 0.24s; }
 .dash-db-card:hover {
-    border-color: var(--accent);
-    transform: translateY(-2px);
-    box-shadow: var(--shadow-md), 0 0 0 1px var(--accent-subtle);
+    border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+    transform: translateY(-3px);
+    box-shadow: var(--shadow-md), 0 0 20px color-mix(in srgb, var(--accent) 6%, transparent);
 }
 
 .dash-db-header {
@@ -500,7 +572,7 @@ struct DashboardCSS {
     height: 100%;
     background: linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent) 50%, var(--success)));
     border-radius: 2px;
-    transition: width 0.8s ease-out;
+    transition: width 1s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .dash-db-stats {
@@ -522,7 +594,7 @@ struct DashboardCSS {
 .dash-db-cache-danger { color: var(--danger); }
 .dash-db-deadlocks { color: var(--danger); font-weight: 600; }
 
-/* ─── Dashboard Empty State ──────────────────────────────────────────── */
+/* ─── Empty State ───────────────────────────────────────────────────── */
 
 .dash-empty {
     padding: var(--sp-5);
@@ -531,8 +603,6 @@ struct DashboardCSS {
     font-size: var(--font-size-sm);
     font-style: italic;
 }
-
-/* ─── Dashboard Grid Layout ──────────────────────────────────────────── */
 )_CSS_"; }
 
 };

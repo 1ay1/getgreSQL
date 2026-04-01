@@ -60,15 +60,16 @@ static auto json_escape_str(std::string_view s) -> std::string {
 auto IndexHandler::handle(Request& req, AppContext& /*ctx*/) -> Response {
     using namespace ssr;
     auto render = [](Html& h) {
-        // Health + stats: full width stacking
+        // Health ribbon (system status at a glance)
         h.raw("<div id=\"dash-health\" hx-get=\"/dashboard/health\" hx-trigger=\"load\" hx-swap=\"innerHTML\"></div>\n");
+        // Big metric cards (connections, cache, throughput)
         h.raw("<div id=\"dash-stats\" hx-get=\"/dashboard/stats\" hx-trigger=\"load\" hx-swap=\"innerHTML\"></div>\n");
-        // Two-column row: activity + top tables
+        // Two-column row: live activity + top tables
         h.raw("<div class=\"dash-row\">\n");
-        h.raw("  <div id=\"dash-activity\" hx-get=\"/dashboard/activity\" hx-trigger=\"load\" hx-swap=\"innerHTML\"></div>\n");
+        h.raw("  <div id=\"dash-activity\" hx-get=\"/dashboard/activity\" hx-trigger=\"load, every 5s\" hx-swap=\"innerHTML\"></div>\n");
         h.raw("  <div id=\"dash-top-tables\" hx-get=\"/dashboard/top-tables\" hx-trigger=\"load\" hx-swap=\"innerHTML\"></div>\n");
         h.raw("</div>\n");
-        // Two-column row: databases + activity by db
+        // Databases grid
         h.raw("<div id=\"dash-content\" hx-get=\"/dashboard/content\" hx-trigger=\"load\" hx-swap=\"innerHTML\"></div>\n");
     };
     if (req.is_htmx()) return Response::html(render_partial(render));
@@ -220,6 +221,24 @@ auto DashboardStatsHandler::handle(Request& /*req*/, AppContext& ctx) -> Respons
     }
     h.raw("</div></div>");
 
+    // Database size card
+    auto db_size_result = conn->get().exec(
+        "SELECT pg_size_pretty(pg_database_size(current_database())), "
+        "pg_database_size(current_database()), "
+        "(SELECT count(*) FROM pg_stat_user_tables), "
+        "(SELECT count(*) FROM pg_stat_user_indexes)"
+    );
+
+    if (db_size_result && db_size_result->row_count() > 0) {
+        StatCard::render({
+            .label = "Database Size",
+            .value = std::string((*db_size_result).get(0, 0)),
+            .detail = std::string((*db_size_result).get(0, 2)) + " tables, "
+                     + std::string((*db_size_result).get(0, 3)) + " indexes",
+            .variant = "big",
+        }, h);
+    }
+
     h.raw("</div>"); // end dash-metrics
     return Response::html(std::move(h).finish());
 }
@@ -297,12 +316,20 @@ auto DashboardActivityHandler::handle(Request& /*req*/, AppContext& ctx) -> Resp
           "<a href=\"/monitor\" class=\"btn btn-sm btn-ghost\" data-spa>Monitor &rsaquo;</a></div>");
     h.raw("<div class=\"dashboard-section-body\">");
 
+    // Filter out our own introspection queries first
+    auto is_self = [](const pg::ActivityEntry& q) {
+        return q.query.find("pg_stat_activity") != std::string::npos
+            && q.query.find("backend_type") != std::string::npos;
+    };
+
     if (!queries || queries->empty()) {
-        h.raw("<div class=\"dash-empty\">No active queries</div>");
+        h.raw("<div class=\"dash-empty\">No connections</div>");
     } else {
-        // Count by state
-        int n_active = 0, n_idle = 0, n_idle_txn = 0;
+        // Count by state (excluding our own connection)
+        int n_active = 0, n_idle = 0, n_idle_txn = 0, n_total = 0;
         for (auto& q : *queries) {
+            if (is_self(q)) continue;
+            n_total++;
             if (q.state == "active") n_active++;
             else if (q.state == "idle in transaction") n_idle_txn++;
             else n_idle++;
@@ -311,15 +338,15 @@ auto DashboardActivityHandler::handle(Request& /*req*/, AppContext& ctx) -> Resp
         h.raw("<span class=\"dash-activity-badge dash-ab-active\">").raw(std::to_string(n_active)).raw(" active</span>");
         h.raw("<span class=\"dash-activity-badge dash-ab-idle\">").raw(std::to_string(n_idle)).raw(" idle</span>");
         if (n_idle_txn > 0) h.raw("<span class=\"dash-activity-badge dash-ab-warn\">").raw(std::to_string(n_idle_txn)).raw(" idle txn</span>");
+        h.raw("<span class=\"dash-activity-badge dash-ab-idle\">").raw(std::to_string(n_total)).raw(" total</span>");
         h.raw("</div>");
 
-        // Show active (non-idle) queries, skip our own introspection
+        // Show non-idle queries (skip our own)
         int shown = 0;
         h.raw("<div class=\"dash-activity-list\">");
         for (auto& q : *queries) {
             if (q.state == "idle" || q.query.empty()) continue;
-            // Skip our own dashboard queries
-            if (q.query.find("pg_stat_activity") != std::string::npos && q.query.find("backend_type") != std::string::npos) continue;
+            if (is_self(q)) continue;
             if (shown >= 8) break;
             auto state_cls = q.state == "active" ? "active" : q.state == "idle in transaction" ? "warning" : "idle";
             h.raw("<div class=\"dash-activity-row\">");
