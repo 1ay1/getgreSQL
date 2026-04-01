@@ -44,26 +44,29 @@
             var ctid = tr ? tr.getAttribute('data-ctid') : '';
             var colName = editableSpan ? editableSpan.getAttribute('data-col') : colLabel;
 
-            // ── Edit actions (only for editable cells with ctid) ─────
-            if (editableSpan && ctid && isEditable) {
+            // ── Edit actions — same for ALL data views ─────────────
+            var canEdit = editableSpan && editableSpan.hasAttribute('hx-get');
+            if (canEdit) {
                 items.push({
                     label: 'Edit Cell',
                     icon: '&#9998;',
                     kbd: 'F2',
-                    action: function() { startEdit(editableSpan); }
+                    action: function() { htmx.trigger(editableSpan, 'dblclick'); }
                 });
-                items.push({
-                    label: isNull ? 'Set Value...' : 'Set NULL',
-                    icon: '&#8709;',
-                    action: function() {
-                        if (isNull) {
-                            editCell(editableSpan);
-                        } else {
+                if (!isNull) {
+                    items.push({
+                        label: 'Set NULL',
+                        icon: '&#8709;',
+                        action: function() {
                             setToNull(db, schema, tableName, colName, ctid, editableSpan);
                         }
-                    }
-                });
+                    });
+                }
                 items.push({sep: true});
+            }
+
+            // ── Table-level actions (only for table browse with full context) ──
+            if (isEditable && ctid) {
                 items.push({
                     label: 'Insert Row',
                     icon: '+',
@@ -81,18 +84,6 @@
                             deleteRowViaApi(db, schema, tableName, ctid);
                         }
                     }
-                });
-                items.push({sep: true});
-            }
-
-            // ── Edit actions for read-only cells (generate SQL) ─────
-            var dvCell = cell.querySelector('.dv-cell');
-            if (dvCell && !editableSpan) {
-                items.push({
-                    label: 'Edit → Copy UPDATE',
-                    icon: '&#9998;',
-                    kbd: 'F2',
-                    action: function() { startEdit(dvCell); }
                 });
                 items.push({sep: true});
             }
