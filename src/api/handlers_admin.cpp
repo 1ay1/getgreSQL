@@ -5,7 +5,6 @@
 #include "pg/monitor.hpp"
 
 #include <format>
-#include <chrono>
 
 namespace getgresql::api {
 
@@ -620,66 +619,6 @@ auto TerminateHandler::handle(Request& req, AppContext& ctx) -> Response {
     }
 
     return Response::html(render_to_string<Alert>({std::format("Terminated backend PID {}", pid), "info"}));
-}
-
-// ─── ExplainPageHandler ─────────────────────────────────────────────
-
-auto ExplainPageHandler::handle(Request& req, AppContext& /*ctx*/) -> Response {
-    auto h = Html::with_capacity(4096);
-    h.raw(R"(<div id="query-workspace" class="query-panel" data-mode="explain"></div>)");
-
-    if (req.is_htmx()) return Response::html(std::move(h).finish());
-    return Response::html(render_page_full("Explain", "Explain", [&](Html& ph) {
-        ph.raw(h.view());
-    }));
-}
-
-// ─── ExplainExecHandler ─────────────────────────────────────────────
-
-auto ExplainExecHandler::handle(Request& req, AppContext& ctx) -> Response {
-    auto body = std::string(req.body());
-
-    auto sql = form_value(body, "sql");
-    auto analyze_str = form_value(body, "analyze");
-    bool analyze = (analyze_str == "true");
-
-    if (sql.empty()) {
-        return Response::html(render_to_string<Alert>({"No SQL provided", "warning"}));
-    }
-
-    auto conn = ctx.pool.checkout();
-    if (!conn) {
-        return Response::html(render_to_string<Alert>({error_message(conn.error()), "error"}));
-    }
-
-    auto start = std::chrono::steady_clock::now();
-    auto result = pg::explain_query(conn->get(), sql, analyze);
-    auto elapsed = std::chrono::steady_clock::now() - start;
-    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
-
-    if (!result) {
-        auto h = Html::with_capacity(1024);
-        h.raw(R"(<div class="query-error"><strong>Error:</strong> )").text(error_message(result.error())).raw("</div>");
-        return Response::html(std::move(h).finish());
-    }
-
-    auto h = Html::with_capacity(4096);
-
-    if (analyze) {
-        h.raw(std::format(
-            R"(<div class="query-info"><span class="rows-badge">Planning: {:.3f} ms</span> <span class="time-badge">Execution: {:.3f} ms</span> <span class="time-badge">Wall: {} ms</span></div>)",
-            result->planning_time, result->execution_time, ms
-        ));
-    } else {
-        h.raw(std::format(
-            R"(<div class="query-info"><span class="rows-badge">Cost: {:.2f}</span> <span class="time-badge">Wall: {} ms</span></div>)",
-            result->total_cost, ms
-        ));
-    }
-
-    h.raw("<div style=\"padding:var(--sp-4)\"><div class=\"explain-plan\">").text(result->plan_text).raw("</div></div>");
-
-    return Response::html(std::move(h).finish());
 }
 
 } // namespace getgresql::api

@@ -111,9 +111,8 @@ using AppRoutes = RouteTable<
     // API
     Route<GET,  "/api/pg-types",                                    PgTypesHandler>,
 
-    // EXPLAIN
-    Route<GET,  "/explain",                                         ExplainPageHandler>,
-    Route<POST, "/explain/exec",                                    ExplainExecHandler>,
+    // Query explain (used by editor.js)
+    Route<POST, "/query/explain",                                   ExplainExecHandler>,
 
     // API (JSON)
     Route<GET,  "/api/completions",                                 CompletionsHandler>,

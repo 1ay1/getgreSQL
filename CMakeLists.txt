@@ -45,6 +45,7 @@ add_custom_command(
     DEPENDS
         ${CMAKE_SOURCE_DIR}/assets/css/style.css
         ${CMAKE_SOURCE_DIR}/assets/js/app.js
+        ${CMAKE_SOURCE_DIR}/assets/js/dataview.js
         ${CMAKE_SOURCE_DIR}/assets/js/editor.js
     COMMENT "Embedding static assets"
 )

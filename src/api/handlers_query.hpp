@@ -16,6 +16,11 @@ struct QueryExecHandler {
     static auto handle(Request& req, AppContext& ctx) -> Response;
 };
 
+// POST /query/explain — run EXPLAIN/ANALYZE
+struct ExplainExecHandler {
+    static auto handle(Request& req, AppContext& ctx) -> Response;
+};
+
 // GET /api/completions — JSON metadata for SQL editor autocomplete
 struct CompletionsHandler {
     static auto handle(Request& req, AppContext& ctx) -> Response;

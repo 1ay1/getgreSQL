@@ -171,6 +171,245 @@ struct Table {
     }
 };
 
+// ─── DataView ───────────────────────────────────────────────────────
+// Unified data grid component used by both query results and table browse.
+// Renders a consistent HTML structure that dataview.js enhances with
+// client-side sorting, filtering, copy, export, column resize, and
+// keyboard navigation.
+//
+// Usage (read-only, e.g. query results):
+//   DataView::begin(h, {.row_count=42, .exec_ms=15});
+//   DataView::columns(h, cols);
+//   DataView::row(h, cells);
+//   DataView::end(h);
+//
+// Usage (editable, e.g. table browse):
+//   DataView::begin(h, {.row_count=42, .editable=true, .db="mydb",
+//       .schema="public", .table="users", .page=1, .limit=50,
+//       .total_rows=1200, .base_url="/db/mydb/schema/public/table/users/browse"});
+//   DataView::columns(h, cols);
+//   DataView::editable_row(h, ctid, row_num, cells);
+//   DataView::end(h);
+
+struct DataView {
+    struct Options {
+        int row_count = 0;
+        int exec_ms = 0;
+        std::string_view command_tag;  // e.g. "INSERT" for non-SELECT
+
+        // Editable context (table browse)
+        bool editable = false;
+        std::string_view db;
+        std::string_view schema;
+        std::string_view table;
+
+        // Pagination (only for table browse)
+        int page = 0;       // 0 = no pagination
+        int limit = 0;
+        long long total_rows = 0;
+        std::string_view base_url;
+    };
+
+    struct DCol {
+        std::string_view name;
+        std::string_view type_hint;  // "numeric", "text", "boolean", "json", "date", ""
+        bool sortable = true;
+    };
+
+    struct Cell {
+        std::string value;
+        bool is_null = false;
+        bool is_raw = false;  // if true, value is already HTML-escaped
+    };
+
+    // ── begin: renders info bar + toolbar + opens table ──
+    static auto begin(Html& h, const Options& o) -> void {
+        h.raw("<div class=\"data-view\"");
+        if (o.editable) {
+            h.raw(" data-editable=\"true\" data-db=\"").text(o.db)
+             .raw("\" data-schema=\"").text(o.schema)
+             .raw("\" data-table=\"").text(o.table).raw("\"");
+        }
+        h.raw(">\n");
+
+        // Info bar
+        if (o.command_tag.empty()) {
+            h.raw("<div class=\"query-info\"><span class=\"rows-badge\">")
+             .raw(std::to_string(o.row_count)).raw(" rows</span>");
+            if (o.exec_ms > 0) {
+                h.raw(" <span class=\"time-badge\">").raw(std::to_string(o.exec_ms)).raw(" ms</span>");
+            }
+            if (o.page > 0) {
+                auto total_pages = std::max(1LL, (o.total_rows + o.limit - 1) / o.limit);
+                h.raw(" <span class=\"time-badge\">~").raw(std::to_string(o.total_rows))
+                 .raw(" total &middot; page ").raw(std::to_string(o.page))
+                 .raw(" of ~").raw(std::to_string(total_pages)).raw("</span>");
+            }
+            h.raw("</div>\n");
+        } else {
+            h.raw("<div class=\"query-info\"><span class=\"rows-badge\">").text(o.command_tag)
+             .raw(" &mdash; ").raw(std::to_string(o.row_count)).raw(" affected</span>");
+            if (o.exec_ms > 0) {
+                h.raw(" <span class=\"time-badge\">").raw(std::to_string(o.exec_ms)).raw(" ms</span>");
+            }
+            h.raw("</div>\n");
+        }
+
+        // Toolbar
+        h.raw("<div class=\"dv-toolbar\">");
+        // Filter input
+        h.raw("<input type=\"search\" class=\"dv-filter-input\" placeholder=\"Filter rows...\" title=\"Type to filter visible rows\">");
+
+        if (o.page > 0) {
+            // Pagination
+            auto total_pages = std::max(1LL, (o.total_rows + o.limit - 1) / o.limit);
+            h.raw("<div class=\"btn-group dv-pagination\">");
+            if (o.page > 1) {
+                h.raw("<button class=\"btn btn-sm\" hx-get=\"").raw(o.base_url)
+                 .raw("?page=1&limit=").raw(std::to_string(o.limit))
+                 .raw("\" hx-target=\"#tab-content\" hx-swap=\"innerHTML\">&laquo;</button>");
+                h.raw("<button class=\"btn btn-sm\" hx-get=\"").raw(o.base_url)
+                 .raw("?page=").raw(std::to_string(o.page - 1)).raw("&limit=").raw(std::to_string(o.limit))
+                 .raw("\" hx-target=\"#tab-content\" hx-swap=\"innerHTML\">&lsaquo; Prev</button>");
+            }
+            if (o.page < static_cast<int>(total_pages)) {
+                h.raw("<button class=\"btn btn-sm\" hx-get=\"").raw(o.base_url)
+                 .raw("?page=").raw(std::to_string(o.page + 1)).raw("&limit=").raw(std::to_string(o.limit))
+                 .raw("\" hx-target=\"#tab-content\" hx-swap=\"innerHTML\">Next &rsaquo;</button>");
+            }
+            h.raw("</div>");
+
+            // Page size
+            h.raw("<div class=\"btn-group dv-page-size\">");
+            for (auto sz : {25, 50, 100, 250}) {
+                auto cls = (sz == o.limit) ? "btn btn-sm btn-primary" : "btn btn-sm";
+                h.raw("<button class=\"").raw(cls).raw("\" hx-get=\"").raw(o.base_url)
+                 .raw("?page=1&limit=").raw(std::to_string(sz))
+                 .raw("\" hx-target=\"#tab-content\" hx-swap=\"innerHTML\">").raw(std::to_string(sz)).raw("</button>");
+            }
+            h.raw("</div>");
+        }
+
+        // Export buttons
+        h.raw("<div class=\"btn-group dv-export\">"
+              "<button class=\"btn btn-sm btn-ghost\" data-dv-export=\"csv\" title=\"Export CSV\">CSV</button>"
+              "<button class=\"btn btn-sm btn-ghost\" data-dv-export=\"json\" title=\"Export JSON\">JSON</button>"
+              "<button class=\"btn btn-sm btn-ghost\" data-dv-export=\"sql\" title=\"Copy as INSERT\">SQL</button>"
+              "</div>");
+
+        // Copy button
+        h.raw("<button class=\"btn btn-sm btn-ghost\" data-dv-action=\"copy\" title=\"Copy selection (Ctrl+C)\">Copy</button>");
+
+        if (o.editable) {
+            // CSV export (server-side)
+            h.raw("<a href=\"/db/").raw(o.db).raw("/schema/").raw(o.schema).raw("/table/").raw(o.table)
+             .raw("/export\" class=\"btn btn-sm btn-ghost\" title=\"Download full CSV\">&#8615; Full CSV</a>");
+            // Insert button
+            h.raw("<button class=\"btn btn-sm btn-success\" data-dv-action=\"toggle-insert\">+ Insert</button>");
+        }
+
+        h.raw("</div>\n"); // end toolbar
+
+        // Insert form (hidden, editable only)
+        if (o.editable) {
+            h.raw("<div class=\"dv-insert-form\" style=\"display:none\">"
+                  "<form hx-post=\"/db/").raw(o.db).raw("/schema/").raw(o.schema)
+             .raw("/table/").raw(o.table).raw("/insert-row\" hx-target=\"#tab-content\" hx-swap=\"innerHTML\">"
+                  "<div class=\"insert-form-grid\" id=\"dv-insert-fields\"></div>"
+                  "<div class=\"insert-actions\">"
+                  "<button type=\"submit\" class=\"btn btn-sm btn-primary\">Insert</button>"
+                  "<button type=\"button\" class=\"btn btn-sm\" data-dv-action=\"toggle-insert\">Cancel</button>"
+                  "</div></form></div>\n");
+        }
+    }
+
+    // ── columns: renders thead ──
+    static auto columns(Html& h, const std::vector<DCol>& cols, bool with_row_num = false, bool with_actions = false) -> void {
+        h.raw("<div class=\"table-wrapper scrollable\"><table class=\"dv-table\"><thead><tr>");
+        if (with_row_num) h.raw("<th class=\"row-num-header\">#</th>");
+        for (auto& c : cols) {
+            h.raw("<th class=\"sortable\" data-col=\"").text(c.name).raw("\"");
+            if (!c.type_hint.empty()) h.raw(" data-type=\"").raw(c.type_hint).raw("\"");
+            h.raw("><span class=\"dv-th-text\">").text(c.name).raw("</span>"
+                  "<span class=\"dv-resize-handle\"></span></th>");
+        }
+        if (with_actions) h.raw("<th class=\"dv-actions-header\"></th>");
+        h.raw("</tr></thead><tbody>");
+    }
+
+    // ── row: renders a read-only row ──
+    static auto row(Html& h, const std::vector<Cell>& cells) -> void {
+        h.raw("<tr>");
+        for (auto& cell : cells) {
+            h.raw("<td>");
+            if (cell.is_null) {
+                h.raw("<span class=\"null-value\">NULL</span>");
+            } else if (cell.is_raw) {
+                h.raw("<span class=\"dv-cell\">").raw(cell.value).raw("</span>");
+            } else if (cell.value.size() > 200) {
+                h.raw("<span class=\"dv-cell dv-cell-long\">");
+                auto tmp = Html::with_capacity(220);
+                tmp.text(std::string_view(cell.value).substr(0, 200));
+                h.raw(tmp.view()).raw("&hellip;</span>");
+            } else {
+                h.raw("<span class=\"dv-cell\">");
+                h.text(cell.value);
+                h.raw("</span>");
+            }
+            h.raw("</td>");
+        }
+        h.raw("</tr>\n");
+    }
+
+    // ── editable_row: renders a row with editing support ──
+    static auto editable_row(Html& h, std::string_view ctid, int row_num,
+                             const std::vector<DCol>& cols,
+                             const std::vector<Cell>& cells,
+                             std::string_view db, std::string_view schema, std::string_view table) -> void {
+        h.raw("<tr data-ctid=\"").text(ctid).raw("\">");
+        h.raw("<td class=\"row-num\">").raw(std::to_string(row_num)).raw("</td>");
+
+        for (std::size_t i = 0; i < cells.size(); ++i) {
+            auto& cell = cells[i];
+            auto col_name = (i < cols.size()) ? cols[i].name : std::string_view("");
+            h.raw("<td>");
+            if (cell.is_null) {
+                h.raw("<span class=\"null-value editable-cell\" data-col=\"").text(col_name)
+                 .raw("\" data-ctid=\"").text(ctid).raw("\">NULL</span>");
+            } else if (cell.value.size() > 80) {
+                h.raw("<span class=\"editable-cell dv-cell-long\" data-col=\"").text(col_name)
+                 .raw("\" data-ctid=\"").text(ctid).raw("\" data-full=\"");
+                h.text(cell.value);
+                h.raw("\">");
+                auto tmp = Html::with_capacity(80);
+                tmp.text(std::string_view(cell.value).substr(0, 60));
+                h.raw(tmp.view()).raw("&hellip;</span>");
+            } else {
+                h.raw("<span class=\"editable-cell\" data-col=\"").text(col_name)
+                 .raw("\" data-ctid=\"").text(ctid).raw("\">");
+                h.text(cell.value);
+                h.raw("</span>");
+            }
+            h.raw("</td>");
+        }
+
+        // Delete button
+        h.raw("<td><button class=\"btn btn-sm btn-danger\" "
+              "hx-post=\"/db/").raw(db).raw("/schema/").raw(schema).raw("/table/").raw(table)
+         .raw("/delete-row\" hx-vals='{\"ctid\":\"");
+        h.text(ctid);
+        h.raw("\"}' hx-target=\"#tab-content\" hx-swap=\"innerHTML\" "
+              "hx-confirm=\"Delete this row?\">&#10005;</button></td>");
+        h.raw("</tr>\n");
+    }
+
+    // ── end: closes table + container ──
+    static auto end(Html& h) -> void {
+        h.raw("</tbody></table></div>\n"); // close table-wrapper
+        h.raw("</div>\n"); // close data-view
+    }
+};
+
 // ─── Search Input ────────────────────────────────────────────────────
 
 struct SearchInput {
@@ -298,6 +537,7 @@ private:
               "    <link rel=\"stylesheet\" href=\"/assets/css/style.css\">\n"
               "    <script src=\"/assets/js/htmx.min.js\" defer></script>\n"
               "    <script src=\"/assets/js/app.js\" defer></script>\n"
+              "    <script src=\"/assets/js/dataview.js\" defer></script>\n"
               "    <script src=\"/assets/js/editor.js\" defer></script>\n"
               "</head>\n<body>\n");
     }
@@ -309,7 +549,7 @@ private:
               "  <nav class=\"toolbar-nav\">\n");
         constexpr struct { const char* href; const char* icon; const char* label; } navs[] = {
             {"/", "&#9635;", "Dashboard"}, {"/query", "&#9654;", "Query"},
-            {"/explain", "&#9881;", "Explain"}, {"/monitor", "&#9673;", "Monitor"},
+            {"/monitor", "&#9673;", "Monitor"},
         };
         for (auto& n : navs) {
             h.raw("    <a href=\"").raw(n.href).raw("\" class=\"toolbar-btn");

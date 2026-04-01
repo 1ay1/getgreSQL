@@ -519,7 +519,6 @@ function SQLEditorInstance(container, opts) {
     var self = this;
     opts = opts || {};
     this.container = container;
-    this.mode = container.getAttribute('data-mode') || 'query';
     this.completionData = null;
     this.tabs = [];
     this.activeTabId = null;
@@ -535,7 +534,7 @@ function SQLEditorInstance(container, opts) {
 
     this.build();
     this.applySettings();
-    this.addTab(this.mode === 'explain' ? 'Explain 1' : 'Query 1');
+    this.addTab('Query 1');
     this.loadCompletions();
     this.bindEvents();
 }
@@ -615,34 +614,24 @@ SQLEditorInstance.prototype.build = function() {
     // Toolbar
     this.toolbarEl = document.createElement('div');
     this.toolbarEl.className = 'editor-toolbar';
-    if (this.mode === 'explain') {
-        this.toolbarEl.innerHTML =
-            '<button class="btn btn-primary btn-sm" data-action="explain">Explain <kbd>Ctrl+Enter</kbd></button>' +
-            '<button class="btn btn-warning btn-sm" data-action="explain-analyze">Explain Analyze</button>' +
-            '<span class="toolbar-spacer"></span>' +
-            '<button class="btn btn-sm btn-ghost" data-action="find" title="Find (Ctrl+F)">&#128269;</button>' +
-            '<button class="btn btn-sm btn-ghost" data-action="format" title="Format SQL">Format</button>' +
-            '<span class="editor-status"></span>';
-    } else {
-        this.toolbarEl.innerHTML =
-            '<button class="btn btn-primary btn-sm" data-action="run">&#9654; Run <kbd>Ctrl+Enter</kbd></button>' +
-            '<button class="btn btn-sm" data-action="explain">Explain</button>' +
-            '<button class="btn btn-sm" data-action="explain-analyze">Explain Analyze</button>' +
-            '<span class="toolbar-sep-v"></span>' +
-            '<button class="btn btn-sm btn-ghost" data-action="save" title="Save Query (Ctrl+S)">Save</button>' +
-            '<button class="btn btn-sm btn-ghost" data-action="saved" title="Saved Queries">Saved</button>' +
-            '<button class="btn btn-sm btn-ghost" data-action="history" title="Query History">History</button>' +
-            '<span class="toolbar-spacer"></span>' +
-            '<div class="btn-group">' +
-            '<button class="btn btn-sm btn-ghost" data-action="export-csv" title="Export CSV">CSV</button>' +
-            '<button class="btn btn-sm btn-ghost" data-action="export-json" title="Export JSON">JSON</button>' +
-            '<button class="btn btn-sm btn-ghost" data-action="export-sql" title="Export SQL">SQL</button>' +
-            '</div>' +
-            '<span class="toolbar-sep-v"></span>' +
-            '<button class="btn btn-sm btn-ghost" data-action="find" title="Find (Ctrl+F)">&#128269;</button>' +
-            '<button class="btn btn-sm btn-ghost" data-action="format" title="Format SQL">Format</button>' +
-            '<span class="editor-status"></span>';
-    }
+    this.toolbarEl.innerHTML =
+        '<button class="btn btn-primary btn-sm" data-action="run">&#9654; Run <kbd>Ctrl+Enter</kbd></button>' +
+        '<button class="btn btn-sm" data-action="explain">Explain</button>' +
+        '<button class="btn btn-sm" data-action="explain-analyze">Explain Analyze</button>' +
+        '<span class="toolbar-sep-v"></span>' +
+        '<button class="btn btn-sm btn-ghost" data-action="save" title="Save Query (Ctrl+S)">Save</button>' +
+        '<button class="btn btn-sm btn-ghost" data-action="saved" title="Saved Queries">Saved</button>' +
+        '<button class="btn btn-sm btn-ghost" data-action="history" title="Query History">History</button>' +
+        '<span class="toolbar-spacer"></span>' +
+        '<div class="btn-group">' +
+        '<button class="btn btn-sm btn-ghost" data-action="export-csv" title="Export CSV">CSV</button>' +
+        '<button class="btn btn-sm btn-ghost" data-action="export-json" title="Export JSON">JSON</button>' +
+        '<button class="btn btn-sm btn-ghost" data-action="export-sql" title="Export SQL">SQL</button>' +
+        '</div>' +
+        '<span class="toolbar-sep-v"></span>' +
+        '<button class="btn btn-sm btn-ghost" data-action="find" title="Find (Ctrl+F)">&#128269;</button>' +
+        '<button class="btn btn-sm btn-ghost" data-action="format" title="Format SQL">Format</button>' +
+        '<span class="editor-status"></span>';
     // Append common items to toolbar
     this.toolbarEl.innerHTML +=
         '<button class="btn btn-sm btn-ghost" data-action="shortcuts" title="Keyboard Shortcuts">?</button>' +
@@ -948,10 +937,10 @@ SQLEditorInstance.prototype.runQuery = function(mode) {
 
     var url, body;
     if (mode === 'explain') {
-        url = '/explain/exec';
+        url = '/query/explain';
         body = 'sql=' + encodeURIComponent(sql) + '&analyze=false';
     } else if (mode === 'explain-analyze') {
-        url = '/explain/exec';
+        url = '/query/explain';
         body = 'sql=' + encodeURIComponent(sql) + '&analyze=true';
     } else {
         url = '/query/exec';
@@ -1209,7 +1198,7 @@ SQLEditorInstance.prototype.bindEvents = function() {
         // Ctrl+Enter -> run query (or explain in explain mode)
         if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
             e.preventDefault();
-            self.runQuery(self.mode === 'explain' ? 'explain' : 'run');
+            self.runQuery('run');
             return;
         }
 
@@ -1380,9 +1369,13 @@ SQLEditorInstance.prototype.bindEvents = function() {
         else if (action === 'history') self.showHistory();
         else if (action === 'save') self.saveQuery();
         else if (action === 'saved') self.showSavedQueries();
-        else if (action === 'export-csv') exportResults('csv');
-        else if (action === 'export-json') exportResults('json');
-        else if (action === 'export-sql') exportResults('sql');
+        else if (action === 'export-csv' || action === 'export-json' || action === 'export-sql') {
+            var fmt = action.replace('export-', '');
+            // Find DataView in results area and click its export button
+            var dvExport = self.resultsEl.querySelector('[data-dv-export="' + fmt + '"]');
+            if (dvExport) dvExport.click();
+            else if (typeof exportResults === 'function') exportResults(fmt);
+        }
         else if (action === 'settings') self.openSettings();
         else if (action === 'shortcuts') self.showShortcuts();
     });

@@ -71,14 +71,4 @@ struct TerminateHandler {
     static auto handle(Request& req, AppContext& ctx) -> Response;
 };
 
-// GET /explain — EXPLAIN ANALYZE page
-struct ExplainPageHandler {
-    static auto handle(Request& req, AppContext& ctx) -> Response;
-};
-
-// POST /explain/exec — run EXPLAIN
-struct ExplainExecHandler {
-    static auto handle(Request& req, AppContext& ctx) -> Response;
-};
-
 } // namespace getgresql::api

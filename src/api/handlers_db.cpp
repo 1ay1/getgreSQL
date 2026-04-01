@@ -311,20 +311,19 @@ auto TableDataHandler::handle(Request& req, AppContext& ctx) -> Response {
     if (!result) return Response::error(error_message(result.error()));
 
     auto h = Html::with_capacity(16384);
-    h.raw("<div class=\"query-info\"><span class=\"rows-badge\">").raw(std::to_string(result->row_count()))
-     .raw(" rows</span> <span class=\"time-badge\">limit ").raw(std::to_string(limit)).raw("</span></div>");
-    std::vector<Col> cols;
-    for (int c = 0; c < result->col_count(); ++c) cols.push_back({result->column_name(c),"",true});
-    Table::begin(h, cols);
+    std::vector<DataView::DCol> cols;
+    for (int c = 0; c < result->col_count(); ++c) cols.push_back({result->column_name(c)});
+    DataView::begin(h, {.row_count = result->row_count()});
+    DataView::columns(h, cols);
     for (auto row : *result) {
-        std::vector<std::string> cells;
+        std::vector<DataView::Cell> cells;
         for (int c = 0; c < row.col_count(); ++c) {
-            if (row.is_null(c)) cells.emplace_back("<span class=\"null-value\">NULL</span>");
-            else { auto v = row[c]; cells.push_back(v.size()>200 ? escape(v.substr(0,200))+"..." : escape(v)); }
+            if (row.is_null(c)) cells.push_back({.is_null = true});
+            else cells.push_back({.value = std::string(row[c])});
         }
-        Table::row(h, cells);
+        DataView::row(h, cells);
     }
-    Table::end(h);
+    DataView::end(h);
     return Response::html(std::move(h).finish());
 }
 
@@ -470,7 +469,7 @@ auto TableBrowseHandler::handle(Request& req, AppContext& ctx) -> Response {
         total_rows = count_res->get_int(0, 0).value_or(0);
         if (total_rows < 0) total_rows = 0; // -1 means never analyzed
     }
-    int total_pages = std::max(1, static_cast<int>((total_rows + limit - 1) / limit));
+
 
     // Fetch data WITH ctid for row identification (fast, small response)
     auto data_sql = std::format("SELECT ctid, * FROM \"{}\".\"{}\"", schema_name, table_name);
@@ -485,99 +484,64 @@ auto TableBrowseHandler::handle(Request& req, AppContext& ctx) -> Response {
     );
 
     auto base_url = std::format("/db/{}/schema/{}/table/{}/browse", db_name, schema_name, table_name);
-    auto meta = std::format("data-schema=\"{}\" data-table=\"{}\" data-db=\"{}\"",
-        escape(schema_name), escape(table_name), escape(db_name));
 
-    std::string content;
+    auto h = Html::with_capacity(16384);
 
-    // Toolbar
-    content += "<div class=\"data-toolbar\">";
-    content += std::format("<span class=\"data-info\">~{} rows | Page {} of ~{}</span>", total_rows, page, total_pages);
-    content += "<div class=\"btn-group\">";
-    if (page > 1)
-        content += std::format("<button class=\"btn btn-sm\" hx-get=\"{}?page=1&limit={}\" hx-target=\"#tab-content\" hx-swap=\"innerHTML\">&laquo;</button>", base_url, limit);
-    if (page > 1)
-        content += std::format("<button class=\"btn btn-sm\" hx-get=\"{}?page={}&limit={}\" hx-target=\"#tab-content\" hx-swap=\"innerHTML\">&lsaquo; Prev</button>", base_url, page-1, limit);
-    if (page < total_pages)
-        content += std::format("<button class=\"btn btn-sm\" hx-get=\"{}?page={}&limit={}\" hx-target=\"#tab-content\" hx-swap=\"innerHTML\">Next &rsaquo;</button>", base_url, page+1, limit);
-    content += "</div>";
-    content += "<div class=\"btn-group\">";
-    for (auto sz : {25, 50, 100, 250}) {
-        auto cls = (sz == limit) ? "btn btn-sm btn-primary" : "btn btn-sm";
-        content += std::format("<button class=\"{}\" hx-get=\"{}?page=1&limit={}\" hx-target=\"#tab-content\" hx-swap=\"innerHTML\">{}</button>", cls, base_url, sz, sz);
-    }
-    content += "</div>";
-    content += std::format("<a href=\"/db/{}/schema/{}/table/{}/export\" class=\"btn btn-sm\">CSV</a>", db_name, schema_name, table_name);
-    content += std::format("<button class=\"btn btn-sm btn-success\" onclick=\"document.getElementById('insert-form').style.display=document.getElementById('insert-form').style.display==='none'?'':'none'\">+ Insert</button>");
-    content += "</div>";
-
-    // Insert row form (hidden)
-    content += "<div id=\"insert-form\" style=\"display:none\" class=\"insert-form\">";
-    content += std::format("<form hx-post=\"/db/{}/schema/{}/table/{}/insert-row\" hx-target=\"#tab-content\" hx-swap=\"innerHTML\">", db_name, schema_name, table_name);
-    content += "<div class=\"insert-form-grid\">";
-    // Skip column 0 which is ctid
+    // Build column metadata (skip column 0 = ctid)
+    std::vector<DataView::DCol> cols;
     for (int c = 1; c < result->col_count(); ++c) {
-        auto col_name = std::string(result->column_name(c));
-        content += std::format(
-            "<div class=\"insert-field\"><label>{}</label>"
-            "<input type=\"text\" name=\"col_{}\" placeholder=\"{}\" class=\"insert-input\"></div>",
-            escape(col_name), c - 1, escape(col_name));
+        cols.push_back({result->column_name(c)});
     }
-    content += "</div><div class=\"insert-actions\">";
-    content += "<button type=\"submit\" class=\"btn btn-sm btn-primary\">Insert</button>";
-    content += "<button type=\"button\" class=\"btn btn-sm\" onclick=\"this.closest('#insert-form').style.display='none'\">Cancel</button>";
-    content += "</div></form></div>";
 
-    // Data grid — column 0 is ctid (hidden), columns 1+ are data
-    content += "<div class=\"table-wrapper scrollable\" id=\"data-grid-wrap\"><table id=\"data-grid\">";
-    content += "<thead><tr><th class=\"row-num-header\">#</th>";
-    for (int c = 1; c < result->col_count(); ++c) {
-        content += std::format("<th class=\"sortable\">{}</th>", escape(result->column_name(c)));
+    DataView::begin(h, {
+        .row_count = result->row_count(),
+        .editable = true,
+        .db = db_name, .schema = schema_name, .table = table_name,
+        .page = page, .limit = limit, .total_rows = total_rows,
+        .base_url = base_url
+    });
+    DataView::columns(h, cols, /*with_row_num=*/true, /*with_actions=*/true);
+
+    // Render insert form fields (JS will populate from column headers,
+    // but we also render hidden fields for server-side form handling)
+    {
+        auto insert_h = Html::with_capacity(2048);
+        for (int c = 1; c < result->col_count(); ++c) {
+            auto col_name = std::string(result->column_name(c));
+            insert_h.raw("<div class=\"insert-field\"><label>").text(col_name)
+             .raw("</label><input type=\"text\" name=\"col_").raw(std::to_string(c - 1))
+             .raw("\" placeholder=\"").text(col_name).raw("\" class=\"insert-input\"></div>");
+        }
+        // Inject into the insert form via a script that runs once
+        h.raw("<script>document.querySelector('#dv-insert-fields').innerHTML = '");
+        // We need to JS-escape the HTML
+        auto fields_html = std::move(insert_h).finish();
+        for (char c : fields_html) {
+            if (c == '\'') h.raw("\\'");
+            else if (c == '\\') h.raw("\\\\");
+            else if (c == '\n') h.raw("\\n");
+            else h.raw(c);
+        }
+        h.raw("';</script>");
     }
-    content += "<th></th></tr></thead><tbody>";
 
     for (auto row : *result) {
         auto ctid = std::string(row[0]); // ctid is column 0
         auto row_num = offset + row.index() + 1;
 
-        content += std::format("<tr data-ctid=\"{}\" {}>", escape(ctid), meta);
-        content += std::format("<td class=\"row-num\">{}</td>", row_num);
-
+        std::vector<DataView::Cell> cells;
         for (int c = 1; c < row.col_count(); ++c) {
-            auto col_name = result->column_name(c);
             if (row.is_null(c)) {
-                content += std::format("<td><span class=\"null-value editable-cell\" data-col=\"{}\" data-ctid=\"{}\">NULL</span></td>", escape(col_name), escape(ctid));
+                cells.push_back({.is_null = true});
             } else {
-                auto val = std::string(row[c]);
-                // Short values: show inline. Long values: truncate with expand button
-                if (val.size() <= 80) {
-                    content += std::format("<td><span class=\"editable-cell\" data-col=\"{}\" data-ctid=\"{}\">{}</span></td>",
-                        escape(col_name), escape(ctid), escape(val));
-                } else {
-                    auto preview = escape(val.substr(0, 60));
-                    content += std::format(
-                        "<td><span class=\"editable-cell cell-long\" data-col=\"{}\" data-ctid=\"{}\" "
-                        "data-full=\"{}\">{}&hellip;</span></td>",
-                        escape(col_name), escape(ctid),
-                        escape(val), preview);
-                }
+                cells.push_back({.value = std::string(row[c])});
             }
         }
-
-        // Delete
-        content += std::format(
-            "<td><button class=\"btn btn-sm btn-danger\" "
-            "hx-post=\"/db/{}/schema/{}/table/{}/delete-row\" "
-            "hx-vals='{{\"ctid\":\"{}\"}}' "
-            "hx-target=\"#tab-content\" hx-swap=\"innerHTML\" "
-            "hx-confirm=\"Delete this row?\">&#10005;</button></td>",
-            db_name, schema_name, table_name, json_escape_str(ctid));
-
-        content += "</tr>";
+        DataView::editable_row(h, ctid, row_num, cols, cells, db_name, schema_name, table_name);
     }
-    content += "</tbody></table></div>";
+    DataView::end(h);
 
-    return Response::html(std::move(content));
+    return Response::html(std::move(h).finish());
 }
 
 // ─── CellUpdateHandler ──────────────────────────────────────────────

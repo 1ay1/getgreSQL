@@ -297,6 +297,9 @@ document.addEventListener('click', function(e) {
     var table = th.closest('table');
     if (!table) return;
 
+    // DataView tables have their own sort handler in dataview.js
+    if (table.classList.contains('dv-table')) return;
+
     var tbody = table.querySelector('tbody');
     if (!tbody) return;
 

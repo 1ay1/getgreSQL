@@ -2,6 +2,7 @@
 #include "core/expected.hpp"
 #include "ssr/components.hpp"
 #include "pg/catalog.hpp"
+#include "pg/monitor.hpp"
 
 #include <chrono>
 #include <format>
@@ -97,46 +98,34 @@ auto QueryExecHandler::handle(Request& req, AppContext& ctx) -> Response {
     auto h = Html::with_capacity(16384);
 
     if (result->row_count() > 0 || result->col_count() > 0) {
-        // Result info bar
-        h.raw("<div class=\"query-info\"><span class=\"rows-badge\">")
-         .raw(std::to_string(result->row_count()))
-         .raw(" rows</span> <span class=\"time-badge\">")
-         .raw(std::to_string(ms))
-         .raw(" ms</span></div>");
-
         // Build column list
-        std::vector<Col> cols;
+        std::vector<DataView::DCol> cols;
         for (int c = 0; c < result->col_count(); ++c) {
-            cols.push_back({result->column_name(c), "", true});
+            cols.push_back({result->column_name(c)});
         }
-        Table::begin(h, cols, "results-table");
+
+        DataView::begin(h, {.row_count = result->row_count(), .exec_ms = static_cast<int>(ms)});
+        DataView::columns(h, cols);
 
         for (auto row : *result) {
-            std::vector<std::string> cells;
+            std::vector<DataView::Cell> cells;
             for (int c = 0; c < row.col_count(); ++c) {
                 if (row.is_null(c)) {
-                    cells.emplace_back("<span class=\"null-value\">NULL</span>");
+                    cells.push_back({.is_null = true});
                 } else {
-                    auto val = row[c];
-                    auto tmp = Html::with_capacity(val.size() + 16);
-                    if (val.size() > 500) {
-                        tmp.text(val.substr(0, 500)).raw("...");
-                    } else {
-                        tmp.text(val);
-                    }
-                    cells.push_back(std::move(tmp).finish());
+                    cells.push_back({.value = std::string(row[c])});
                 }
             }
-            Table::row(h, cells);
+            DataView::row(h, cells);
         }
-        Table::end(h);
+        DataView::end(h);
     } else {
         // Command result (INSERT, UPDATE, etc.)
-        h.raw("<div class=\"query-info\"><span class=\"rows-badge\">")
-         .text(result->command_tag())
-         .raw(" &mdash; ").text(result->affected_rows())
-         .raw(" affected</span> <span class=\"time-badge\">")
-         .raw(std::to_string(ms)).raw(" ms</span></div>");
+        auto affected = std::string(result->affected_rows());
+        DataView::begin(h, {.row_count = affected.empty() ? 0 : std::stoi(affected),
+                            .exec_ms = static_cast<int>(ms),
+                            .command_tag = result->command_tag()});
+        DataView::end(h);
     }
 
     return Response::html(std::move(h).finish());
@@ -176,6 +165,54 @@ auto CompletionsHandler::handle(Request& /*req*/, AppContext& ctx) -> Response {
     h.raw("]}");
 
     return Response::json(std::move(h).finish());
+}
+
+// ─── ExplainExecHandler ─────────────────────────────────────────────
+
+auto ExplainExecHandler::handle(Request& req, AppContext& ctx) -> Response {
+    auto body = std::string(req.body());
+
+    auto sql = form_value(body, "sql");
+    auto analyze_str = form_value(body, "analyze");
+    bool analyze = (analyze_str == "true");
+
+    if (sql.empty()) {
+        return Response::html(render_to_string<Alert>({"No SQL provided", "warning"}));
+    }
+
+    auto conn = ctx.pool.checkout();
+    if (!conn) {
+        return Response::html(render_to_string<Alert>({error_message(conn.error()), "error"}));
+    }
+
+    auto start = std::chrono::steady_clock::now();
+    auto result = pg::explain_query(conn->get(), sql, analyze);
+    auto elapsed = std::chrono::steady_clock::now() - start;
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
+
+    if (!result) {
+        auto h = Html::with_capacity(1024);
+        h.raw(R"(<div class="query-error"><strong>Error:</strong> )").text(error_message(result.error())).raw("</div>");
+        return Response::html(std::move(h).finish());
+    }
+
+    auto h = Html::with_capacity(4096);
+
+    if (analyze) {
+        h.raw(std::format(
+            R"(<div class="query-info"><span class="rows-badge">Planning: {:.3f} ms</span> <span class="time-badge">Execution: {:.3f} ms</span> <span class="time-badge">Wall: {} ms</span></div>)",
+            result->planning_time, result->execution_time, ms
+        ));
+    } else {
+        h.raw(std::format(
+            R"(<div class="query-info"><span class="rows-badge">Cost: {:.2f}</span> <span class="time-badge">Wall: {} ms</span></div>)",
+            result->total_cost, ms
+        ));
+    }
+
+    h.raw("<div style=\"padding:var(--sp-4)\"><div class=\"explain-plan\">").text(result->plan_text).raw("</div></div>");
+
+    return Response::html(std::move(h).finish());
 }
 
 } // namespace getgresql::api

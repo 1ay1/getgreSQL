@@ -3257,9 +3257,173 @@ td.row-num:hover { color: var(--accent); background: var(--accent-subtle); }
     width: 0;
 }
 
+/* ─── DataView ─────────────────────────────────────────────────────── */
+/* Unified data grid component — used by query results and table browse */
+
+.data-view {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+}
+
+/* DataView toolbar */
+.dv-toolbar {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    padding: var(--sp-2) var(--sp-3);
+    background: var(--bg-2);
+    border-bottom: 1px solid var(--border-subtle);
+    font-size: var(--font-size-xs);
+    flex-wrap: wrap;
+    min-height: 36px;
+}
+
+.dv-filter-input {
+    padding: 3px 8px;
+    background: var(--bg-0);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text-0);
+    font-size: var(--font-size-xs);
+    font-family: var(--font-mono);
+    width: 180px;
+    outline: none;
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+.dv-filter-input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent-subtle);
+    width: 240px;
+}
+.dv-filter-count {
+    font-family: var(--font-mono);
+    color: var(--text-3);
+    font-size: var(--font-size-xs);
+}
+
+/* DataView table */
+.dv-table { border-collapse: collapse; width: 100%; }
+.dv-table td {
+    max-width: 250px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    border-right: 1px solid var(--border-subtle);
+    height: 32px;
+}
+.dv-table th {
+    border-right: 1px solid var(--border-subtle);
+    height: 30px;
+    position: relative;
+    user-select: none;
+}
+.dv-table td:last-child, .dv-table th:last-child { border-right: none; }
+
+/* Sort indicators */
+.dv-table th.sortable { cursor: pointer; }
+.dv-table th.sortable:hover { background: var(--accent-subtle); }
+.dv-table th.sort-asc .dv-th-text::after { content: " \2191"; color: var(--accent); }
+.dv-table th.sort-desc .dv-th-text::after { content: " \2193"; color: var(--accent); }
+
+/* Column resize handle */
+.dv-resize-handle {
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 4px;
+    cursor: col-resize;
+    z-index: 1;
+}
+.dv-resize-handle:hover,
+.dv-resize-handle:active {
+    background: var(--accent);
+    opacity: 0.5;
+}
+
+/* Read-only cell (query results) */
+.dv-cell {
+    cursor: default;
+    padding: 1px 2px;
+    border-radius: 2px;
+}
+.dv-cell-selected {
+    background: var(--accent-subtle) !important;
+    box-shadow: inset 0 0 0 1px var(--accent);
+    outline: none;
+}
+.dv-cell-long { cursor: pointer; }
+
+/* Row selection */
+tr.dv-row-selected td {
+    background: var(--accent-subtle) !important;
+}
+.row-num {
+    cursor: pointer;
+    user-select: none;
+    color: var(--text-3);
+    font-family: var(--font-mono);
+    font-size: var(--font-size-xs);
+    text-align: center;
+    min-width: 36px;
+}
+.row-num:hover { color: var(--accent); }
+
+/* Cell status indicators */
+.cell-selected {
+    background: var(--accent-subtle) !important;
+    box-shadow: inset 0 0 0 1px var(--accent);
+}
+.cell-saving { opacity: 0.6; }
+.cell-saved {
+    background: var(--success-subtle);
+    box-shadow: inset 0 0 0 1px rgba(63, 185, 80, 0.3);
+    transition: background 0.3s, box-shadow 0.3s;
+}
+.cell-error {
+    background: var(--danger-subtle) !important;
+    box-shadow: inset 0 0 0 1px rgba(248, 81, 73, 0.4);
+}
+.row-active td { background: rgba(56, 139, 253, 0.04); }
+
+/* Insert form */
+.dv-insert-form {
+    padding: var(--sp-4);
+    background: var(--bg-1);
+    border-bottom: 2px solid var(--accent-dim);
+    animation: slideDown 0.2s ease-out;
+}
+
+/* Actions column */
+.dv-actions-header { width: 40px; }
+
+/* Toast notification */
+.dv-toast {
+    position: absolute;
+    top: var(--sp-2);
+    right: var(--sp-3);
+    padding: var(--sp-2) var(--sp-4);
+    background: var(--bg-1);
+    border: 1px solid var(--success);
+    border-radius: var(--radius);
+    color: var(--success);
+    font-size: var(--font-size-xs);
+    font-family: var(--font-mono);
+    opacity: 0;
+    transform: translateY(-4px);
+    transition: opacity 0.15s, transform 0.15s;
+    pointer-events: none;
+    z-index: 100;
+}
+.dv-toast-show {
+    opacity: 1;
+    transform: translateY(0);
+}
+
 /* ─── Print styles ────────────────────────────────────────────────────── */
 @media print {
-    .sidebar, .toolbar, .status-bar, .tab-bar, .editor-toolbar, .data-toolbar .btn { display: none !important; }
+    .sidebar, .toolbar, .status-bar, .tab-bar, .editor-toolbar, .data-toolbar .btn, .dv-toolbar { display: none !important; }
     .ide { display: block !important; }
     .workspace { margin: 0 !important; }
     .content { padding: 0 !important; }
