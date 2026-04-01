@@ -517,6 +517,206 @@ tr.dv-row-selected td {
     color: var(--text-3);
 }
 
+/* ─── Per-Column Filter Row ──────────────────────────────────────────── */
+
+.dv-filter-row th {
+    padding: 2px !important;
+    background: var(--bg-1) !important;
+    border-bottom: 2px solid var(--accent-dim) !important;
+}
+.dv-col-filter-input {
+    width: 100%;
+    padding: 2px 4px;
+    background: var(--bg-0);
+    border: 1px solid var(--border-subtle);
+    border-radius: 2px;
+    color: var(--text-1);
+    font-size: 0.65rem;
+    font-family: var(--font-mono);
+    outline: none;
+    transition: border-color var(--transition-fast);
+}
+.dv-col-filter-input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent-subtle);
+}
+.dv-col-filter-input::placeholder {
+    color: var(--text-4);
+    font-style: italic;
+}
+
+/* ─── Infinite Scroll ────────────────────────────────────────────────── */
+
+.dv-scroll-sentinel {
+    text-align: center;
+    padding: var(--sp-2) 0;
+    font-size: var(--font-size-xs);
+    color: var(--text-3);
+    font-family: var(--font-mono);
+}
+.dv-scroll-loading {
+    display: inline-block;
+    animation: pulse 1s ease-in-out infinite;
+}
+@keyframes pulse {
+    0%, 100% { opacity: 0.5; }
+    50% { opacity: 1; }
+}
+
+/* ─── Multi-Result Tabs ──────────────────────────────────────────────── */
+
+.multi-result-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+.result-tab-bar {
+    display: flex;
+    gap: 1px;
+    background: var(--bg-2);
+    border-bottom: 1px solid var(--border);
+    padding: 0 var(--sp-3);
+    overflow-x: auto;
+    flex-shrink: 0;
+}
+.result-tab {
+    padding: var(--sp-2) var(--sp-4);
+    font-size: var(--font-size-xs);
+    font-family: var(--font-mono);
+    color: var(--text-2);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    white-space: nowrap;
+    transition: color var(--transition-fast), border-color var(--transition-fast);
+}
+.result-tab:hover { color: var(--text-0); }
+.result-tab.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+}
+.result-tab-error { color: var(--danger) !important; }
+.result-tab-num {
+    display: inline-block;
+    background: var(--bg-3);
+    border-radius: 3px;
+    padding: 0 4px;
+    margin-right: 4px;
+    font-size: 0.6rem;
+}
+.result-tab-rows {
+    background: var(--success-subtle);
+    color: var(--success);
+    border-radius: 3px;
+    padding: 0 4px;
+    font-size: 0.6rem;
+    margin-left: 4px;
+}
+.result-panel { display: none; flex: 1; overflow: auto; }
+.result-panel.active { display: block; }
+
+/* ─── Dry Run ────────────────────────────────────────────────────────── */
+
+.dry-run-result { padding: var(--sp-4); }
+.dry-run-header {
+    font-weight: 700;
+    font-size: var(--font-size-sm);
+    color: var(--warning);
+    padding: var(--sp-3);
+    background: var(--warning-subtle);
+    border: 1px solid rgba(210, 153, 34, 0.3);
+    border-radius: var(--radius);
+    margin-bottom: var(--sp-3);
+}
+.dry-run-sql {
+    padding: var(--sp-3);
+    background: var(--bg-2);
+    border-radius: var(--radius);
+    margin-bottom: var(--sp-3);
+    font-family: var(--font-mono);
+    font-size: var(--font-size-xs);
+    max-height: 80px;
+    overflow: hidden;
+}
+.dry-run-actions {
+    display: flex;
+    gap: var(--sp-3);
+    margin-top: var(--sp-4);
+}
+
+/* ─── Result Diff ────────────────────────────────────────────────────── */
+
+.diff-result { padding: var(--sp-4); }
+.diff-header {
+    font-weight: 700;
+    font-size: var(--font-size-sm);
+    color: var(--text-0);
+    margin-bottom: var(--sp-3);
+}
+.diff-stats {
+    display: flex;
+    gap: var(--sp-4);
+    margin-bottom: var(--sp-3);
+    font-size: var(--font-size-xs);
+    font-family: var(--font-mono);
+}
+.diff-stat { padding: 2px 8px; border-radius: 3px; }
+.diff-added { background: var(--success-subtle); color: var(--success); }
+.diff-removed { background: var(--danger-subtle); color: var(--danger); }
+.diff-same { background: var(--bg-3); color: var(--text-2); }
+.diff-row-added td { background: rgba(63, 185, 80, 0.08) !important; }
+.diff-row-removed td { background: rgba(248, 81, 73, 0.08) !important; text-decoration: line-through; color: var(--text-3); }
+.diff-cell-changed { background: rgba(210, 153, 34, 0.15) !important; font-weight: 600; }
+.diff-marker {
+    width: 24px;
+    text-align: center;
+    font-weight: 700;
+    font-family: var(--font-mono);
+    color: var(--text-3);
+}
+.diff-row-added .diff-marker { color: var(--success); }
+.diff-row-removed .diff-marker { color: var(--danger); }
+.diff-notice {
+    padding: var(--sp-3);
+    background: var(--accent-subtle);
+    border: 1px solid rgba(56, 139, 253, 0.2);
+    border-radius: var(--radius);
+    font-size: var(--font-size-xs);
+    color: var(--accent);
+    margin-bottom: var(--sp-3);
+}
+
+/* ─── History Panel ──────────────────────────────────────────────────── */
+
+.history-panel { padding: var(--sp-4); }
+.history-header {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-4);
+    margin-bottom: var(--sp-3);
+}
+.history-header h3 { margin: 0; font-size: var(--font-size-sm); }
+.history-search {
+    padding: 4px 8px;
+    background: var(--bg-0);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text-0);
+    font-size: var(--font-size-xs);
+    font-family: var(--font-mono);
+    width: 200px;
+    outline: none;
+}
+.history-search:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-subtle); }
+.history-table td, .history-table th { font-size: var(--font-size-xs); padding: var(--sp-2) var(--sp-3); }
+
+/* ─── Warning button ─────────────────────────────────────────────────── */
+.btn-warning {
+    color: var(--warning);
+    border-color: rgba(210, 153, 34, 0.3);
+    background: var(--warning-subtle);
+}
+.btn-warning:hover { background: rgba(210, 153, 34, 0.2); }
+
 /* ─── Explain This popover ────────────────────────────────────────────── */
 
 .dv-lineage-popover {

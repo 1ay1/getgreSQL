@@ -477,12 +477,167 @@ function autoSizeColumns(dv) {
     });
 }
 
+// ─── Per-Column Filtering ────────────────────────────────────────────
+
+function initColumnFilters(dv) {
+    var table = getTable(dv);
+    if (!table || !table.tHead) return;
+    // Don't add twice
+    if (table.tHead.rows.length > 1) return;
+    var headers = getHeaderCells(table);
+    if (headers.length === 0) return;
+
+    var filterRow = document.createElement('tr');
+    filterRow.className = 'dv-filter-row';
+    var colStart = table.querySelector('.row-num-header') ? 1 : 0;
+
+    headers.forEach(function(th, idx) {
+        var td = document.createElement('th');
+        td.className = 'dv-col-filter';
+        if (idx < colStart || th.classList.contains('dv-actions-header')) {
+            td.innerHTML = '';
+        } else {
+            var input = document.createElement('input');
+            input.type = 'text';
+            input.className = 'dv-col-filter-input';
+            input.placeholder = 'Filter...';
+            input.setAttribute('data-filter-col', idx);
+            td.appendChild(input);
+        }
+        filterRow.appendChild(td);
+    });
+
+    table.tHead.appendChild(filterRow);
+
+    // Filter logic: each column input filters independently
+    filterRow.addEventListener('input', function() {
+        var inputs = filterRow.querySelectorAll('.dv-col-filter-input');
+        var filters = [];
+        inputs.forEach(function(inp) {
+            var col = parseInt(inp.getAttribute('data-filter-col'));
+            var val = inp.value.toLowerCase().trim();
+            if (val) filters.push({ col: col, query: val });
+        });
+
+        var rows = getBodyRows(table);
+        var visible = 0;
+        rows.forEach(function(row) {
+            if (filters.length === 0) { row.style.display = ''; visible++; return; }
+            var match = true;
+            for (var f = 0; f < filters.length; f++) {
+                var cell = row.cells[filters[f].col];
+                if (!cell) { match = false; break; }
+                var text = cellText(cell).toLowerCase();
+                if (text.indexOf(filters[f].query) === -1) { match = false; break; }
+            }
+            row.style.display = match ? '' : 'none';
+            if (match) visible++;
+        });
+
+        // Update filter count
+        var badge = dv.querySelector('.dv-filter-count');
+        if (badge) {
+            badge.textContent = filters.length > 0 ? visible + ' / ' + rows.length : '';
+        }
+    });
+}
+
+// ─── Infinite Scroll ─────────────────────────────────────────────────
+
+function initInfiniteScroll(dv) {
+    var wrapper = dv.querySelector('.table-wrapper.scrollable');
+    if (!wrapper) return;
+    var table = getTable(dv);
+    if (!table || !table.tBodies[0]) return;
+
+    // Only for editable views with pagination (table browse)
+    var pagination = dv.querySelector('.dv-pagination');
+    if (!pagination) return;
+
+    // Extract base URL and current state from the "Next" button
+    var nextBtn = pagination.querySelector('button[hx-get]:last-of-type');
+    if (!nextBtn) return;
+    var nextUrl = nextBtn.getAttribute('hx-get');
+    if (!nextUrl) return;
+
+    // Parse current page info
+    var urlMatch = nextUrl.match(/page=(\d+).*limit=(\d+)/);
+    if (!urlMatch) return;
+
+    var state = {
+        loading: false,
+        done: false,
+        page: parseInt(urlMatch[1]) - 1, // current page is next - 1
+        limit: parseInt(urlMatch[2]),
+        baseUrl: nextUrl.replace(/page=\d+/, 'page=PAGENUM')
+    };
+
+    // Hide pagination buttons — we'll load on scroll
+    pagination.style.display = 'none';
+
+    // Add scroll sentinel
+    var sentinel = document.createElement('div');
+    sentinel.className = 'dv-scroll-sentinel';
+    sentinel.innerHTML = '<span class="dv-scroll-loading" style="display:none">Loading more...</span>';
+    wrapper.parentNode.insertBefore(sentinel, wrapper.nextSibling);
+
+    var loadingEl = sentinel.querySelector('.dv-scroll-loading');
+
+    wrapper.addEventListener('scroll', function() {
+        if (state.loading || state.done) return;
+        // Check if near bottom (within 200px)
+        var scrollBottom = wrapper.scrollHeight - wrapper.scrollTop - wrapper.clientHeight;
+        if (scrollBottom > 200) return;
+
+        state.loading = true;
+        state.page++;
+        loadingEl.style.display = '';
+
+        var url = state.baseUrl.replace('PAGENUM', state.page);
+        fetch(url, { headers: { 'HX-Request': 'true' } })
+            .then(function(r) { return r.text(); })
+            .then(function(html) {
+                // Parse the response and extract tbody rows
+                var parser = new DOMParser();
+                var doc = parser.parseFromString('<div>' + html + '</div>', 'text/html');
+                var newTbody = doc.querySelector('.dv-table tbody');
+                if (!newTbody || newTbody.rows.length === 0) {
+                    state.done = true;
+                    loadingEl.textContent = 'All rows loaded';
+                    loadingEl.style.display = '';
+                    return;
+                }
+
+                var tbody = table.tBodies[0];
+                while (newTbody.rows.length > 0) {
+                    tbody.appendChild(newTbody.rows[0]);
+                }
+
+                // Process any htmx attributes on new rows
+                if (window.htmx) htmx.process(tbody);
+
+                loadingEl.style.display = 'none';
+                state.loading = false;
+
+                // Update info bar row count
+                var badge = dv.querySelector('.rows-badge');
+                if (badge) badge.textContent = tbody.rows.length + ' rows loaded';
+            })
+            .catch(function() {
+                state.loading = false;
+                loadingEl.textContent = 'Error loading more rows';
+            });
+    });
+}
+
 function initDataViews() {
     document.querySelectorAll('.data-view').forEach(function(dv) {
         if (dv._dvInit) return;
         dv._dvInit = true;
         initColumnResize(dv);
         autoSizeColumns(dv);
+        initColumnFilters(dv);
+        initInfiniteScroll(dv);
     });
 }
 

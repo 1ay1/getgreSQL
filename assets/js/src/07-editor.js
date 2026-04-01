@@ -618,10 +618,12 @@ SQLEditorInstance.prototype.build = function() {
         '<button class="btn btn-primary btn-sm" data-action="run">&#9654; Run <kbd>Ctrl+Enter</kbd></button>' +
         '<button class="btn btn-sm" data-action="explain">Explain</button>' +
         '<button class="btn btn-sm" data-action="explain-analyze">Explain Analyze</button>' +
+        '<button class="btn btn-sm btn-warning" data-action="dry-run" title="Preview without executing">Dry Run</button>' +
         '<span class="toolbar-sep-v"></span>' +
         '<button class="btn btn-sm btn-ghost" data-action="save" title="Save Query (Ctrl+S)">Save</button>' +
         '<button class="btn btn-sm btn-ghost" data-action="saved" title="Saved Queries">Saved</button>' +
         '<button class="btn btn-sm btn-ghost" data-action="history" title="Query History">History</button>' +
+        '<button class="btn btn-sm btn-ghost" data-action="diff" title="Compare with last result">Diff</button>' +
         '<span class="toolbar-spacer"></span>' +
         '<div class="btn-group">' +
         '<button class="btn btn-sm btn-ghost" data-action="export-csv" title="Export CSV">CSV</button>' +
@@ -924,43 +926,260 @@ SQLEditorInstance.prototype.acceptCompletion = function() {
 
 // ─── Query Execution ─────────────────────────────────────────────────
 
+// Split SQL into individual statements, respecting strings and comments
+SQLEditorInstance.prototype.splitStatements = function(sql) {
+    var stmts = [];
+    var current = '';
+    var inSingle = false, inDouble = false, inDollar = false, dollarTag = '';
+    var inLineComment = false, inBlockComment = false;
+    var i = 0;
+    while (i < sql.length) {
+        var ch = sql[i], next = sql[i + 1] || '';
+        if (inLineComment) {
+            current += ch;
+            if (ch === '\n') inLineComment = false;
+            i++; continue;
+        }
+        if (inBlockComment) {
+            current += ch;
+            if (ch === '*' && next === '/') { current += '/'; inBlockComment = false; i += 2; continue; }
+            i++; continue;
+        }
+        if (inDollar) {
+            current += ch;
+            // Check for closing dollar tag
+            if (ch === '$') {
+                var end = sql.indexOf('$', i + 1);
+                if (end !== -1) {
+                    var tag = sql.substring(i, end + 1);
+                    if (tag === dollarTag) { current += sql.substring(i + 1, end + 1); i = end + 1; inDollar = false; continue; }
+                }
+            }
+            i++; continue;
+        }
+        if (inSingle) {
+            current += ch;
+            if (ch === "'" && next === "'") { current += "'"; i += 2; continue; } // escaped
+            if (ch === "'") inSingle = false;
+            i++; continue;
+        }
+        if (inDouble) {
+            current += ch;
+            if (ch === '"') inDouble = false;
+            i++; continue;
+        }
+        // Start of string/comment
+        if (ch === '-' && next === '-') { inLineComment = true; current += ch; i++; continue; }
+        if (ch === '/' && next === '*') { inBlockComment = true; current += '/*'; i += 2; continue; }
+        if (ch === "'") { inSingle = true; current += ch; i++; continue; }
+        if (ch === '"') { inDouble = true; current += ch; i++; continue; }
+        if (ch === '$') {
+            var dEnd = sql.indexOf('$', i + 1);
+            if (dEnd !== -1 && dEnd - i < 64) {
+                var dTag = sql.substring(i, dEnd + 1);
+                if (/^\$[a-zA-Z0-9_]*\$$/.test(dTag)) { dollarTag = dTag; inDollar = true; current += ch; i++; continue; }
+            }
+        }
+        if (ch === ';') {
+            current += ';';
+            var trimmed = current.trim();
+            if (trimmed && trimmed !== ';') stmts.push(trimmed);
+            current = '';
+            i++; continue;
+        }
+        current += ch;
+        i++;
+    }
+    var rest = current.trim();
+    if (rest && rest !== ';') stmts.push(rest);
+    return stmts;
+};
+
 SQLEditorInstance.prototype.runQuery = function(mode) {
     var sql = this.getSelectedOrAll();
     if (!sql.trim()) return;
 
     var self = this;
-    this.pushHistory(sql);
 
-    // Show loading
-    this.resultsEl.innerHTML = '<div class="loading">Running...</div>';
-    this.updateStatus('Running...');
-
-    var url, body;
-    if (mode === 'explain') {
-        url = '/query/explain';
-        body = 'sql=' + encodeURIComponent(sql) + '&analyze=false';
-    } else if (mode === 'explain-analyze') {
-        url = '/query/explain';
-        body = 'sql=' + encodeURIComponent(sql) + '&analyze=true';
-    } else {
-        url = '/query/exec';
-        body = 'sql=' + encodeURIComponent(sql);
+    // Detect if this is DML and mode is 'dry-run'
+    if (mode === 'dry-run') {
+        this.dryRun(sql);
+        return;
     }
 
-    var start = performance.now();
+    var stmts = (mode === 'run') ? this.splitStatements(sql) : [sql];
 
-    fetch(url, {
+    // For explain modes, always run as single statement
+    if (mode === 'explain' || mode === 'explain-analyze') stmts = [sql];
+
+    // Show loading
+    this.resultsEl.innerHTML = '<div class="loading">Running ' + stmts.length + ' statement' + (stmts.length > 1 ? 's' : '') + '...</div>';
+    this.updateStatus('Running...');
+
+    var start = performance.now();
+    var results = [];
+    var completed = 0;
+
+    function execStatement(idx) {
+        if (idx >= stmts.length) {
+            // All done — render results
+            var elapsed = (performance.now() - start).toFixed(0);
+            self.pushHistory(sql, { ms: parseInt(elapsed), rows: results.reduce(function(s, r) { return s + (r.rows || 0); }, 0) });
+            self.renderMultiResults(results, elapsed);
+            self.updateStatus(elapsed + ' ms');
+            return;
+        }
+
+        var stmt = stmts[idx];
+        var url, body;
+        if (mode === 'explain') {
+            url = '/query/explain';
+            body = 'sql=' + encodeURIComponent(stmt) + '&analyze=false';
+        } else if (mode === 'explain-analyze') {
+            url = '/query/explain';
+            body = 'sql=' + encodeURIComponent(stmt) + '&analyze=true';
+        } else {
+            url = '/query/exec';
+            body = 'sql=' + encodeURIComponent(stmt);
+        }
+
+        fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'HX-Request': 'true' },
+            body: body,
+        })
+        .then(function(r) { return r.text(); })
+        .then(function(html) {
+            // Extract row count from the response HTML
+            var rowMatch = html.match(/(\d+)\s*rows?/);
+            results.push({ html: html, stmt: stmt, rows: rowMatch ? parseInt(rowMatch[1]) : 0, error: false });
+            execStatement(idx + 1);
+        })
+        .catch(function(err) {
+            results.push({ html: '<div class="query-error">' + esc(err.message) + '</div>', stmt: stmt, rows: 0, error: true });
+            execStatement(idx + 1);
+        });
+    }
+
+    execStatement(0);
+};
+
+SQLEditorInstance.prototype.renderMultiResults = function(results, elapsed) {
+    var self = this;
+    if (results.length === 1) {
+        // Single statement — no tabs needed
+        this.resultsEl.innerHTML = results[0].html;
+        if (window.htmx) htmx.process(this.resultsEl);
+        // Store for diff
+        this._lastResults = results;
+        return;
+    }
+
+    // Multiple statements — render result tabs
+    var container = document.createElement('div');
+    container.className = 'multi-result-container';
+
+    var tabBar = document.createElement('div');
+    tabBar.className = 'result-tab-bar';
+
+    var panels = document.createElement('div');
+    panels.className = 'result-panels';
+
+    for (var i = 0; i < results.length; i++) {
+        var r = results[i];
+        var label = r.stmt.substring(0, 30).replace(/\s+/g, ' ');
+        if (r.stmt.length > 30) label += '...';
+        var errorCls = r.error ? ' result-tab-error' : '';
+
+        var tab = document.createElement('div');
+        tab.className = 'result-tab' + (i === 0 ? ' active' : '') + errorCls;
+        tab.setAttribute('data-result-idx', i);
+        tab.innerHTML = '<span class="result-tab-num">' + (i + 1) + '</span> ' + esc(label);
+        if (r.rows > 0) tab.innerHTML += ' <span class="result-tab-rows">' + r.rows + '</span>';
+        tabBar.appendChild(tab);
+
+        var panel = document.createElement('div');
+        panel.className = 'result-panel' + (i === 0 ? ' active' : '');
+        panel.setAttribute('data-result-idx', i);
+        panel.innerHTML = r.html;
+        panels.appendChild(panel);
+    }
+
+    container.appendChild(tabBar);
+    container.appendChild(panels);
+    this.resultsEl.innerHTML = '';
+    this.resultsEl.appendChild(container);
+
+    // Tab switching
+    tabBar.addEventListener('click', function(e) {
+        var tab = e.target.closest('.result-tab');
+        if (!tab) return;
+        var idx = tab.getAttribute('data-result-idx');
+        tabBar.querySelectorAll('.result-tab').forEach(function(t) { t.classList.remove('active'); });
+        panels.querySelectorAll('.result-panel').forEach(function(p) { p.classList.remove('active'); });
+        tab.classList.add('active');
+        panels.querySelector('.result-panel[data-result-idx="' + idx + '"]').classList.add('active');
+    });
+
+    if (window.htmx) htmx.process(this.resultsEl);
+    this._lastResults = results;
+};
+
+SQLEditorInstance.prototype.getSelectedOrAll = function() {
+    var ta = this.textarea;
+    // If there's a selection, use it
+    if (ta.selectionStart !== ta.selectionEnd) {
+        return ta.value.substring(ta.selectionStart, ta.selectionEnd);
+    }
+    // Auto-detect current statement: find the statement the cursor is in
+    var text = ta.value;
+    if (text.indexOf(';') === -1) return text; // single statement
+    var pos = ta.selectionStart;
+    var stmts = this.splitStatements(text);
+    if (stmts.length <= 1) return text;
+    // Map each statement back to its position in the source
+    var offset = 0;
+    for (var i = 0; i < stmts.length; i++) {
+        var idx = text.indexOf(stmts[i].replace(/;$/, ''), offset);
+        if (idx === -1) idx = offset;
+        var end = idx + stmts[i].length;
+        if (pos >= idx && pos <= end + 1) return stmts[i];
+        offset = end;
+    }
+    return text;
+};
+
+// Dry-run: show EXPLAIN output + affected row estimate for DML
+SQLEditorInstance.prototype.dryRun = function(sql) {
+    var self = this;
+    this.resultsEl.innerHTML = '<div class="loading">Dry run — analyzing...</div>';
+    this.updateStatus('Dry run...');
+
+    fetch('/query/explain', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'HX-Request': 'true' },
-        body: body,
+        body: 'sql=' + encodeURIComponent(sql) + '&analyze=false',
     })
     .then(function(r) { return r.text(); })
     .then(function(html) {
-        var elapsed = (performance.now() - start).toFixed(0);
-        self.resultsEl.innerHTML = html;
-        self.updateStatus(elapsed + ' ms');
-        // Trigger htmx processing on the results for any hx-* attributes
-        if (window.htmx) htmx.process(self.resultsEl);
+        var wrapper = '<div class="dry-run-result">' +
+            '<div class="dry-run-header">Dry Run — No changes made</div>' +
+            '<div class="dry-run-sql"><code>' + esc(sql.substring(0, 300)) + '</code></div>' +
+            html +
+            '<div class="dry-run-actions">' +
+            '<button class="btn btn-sm btn-primary" data-action="run-confirmed">Execute for real</button>' +
+            '<button class="btn btn-sm" data-action="cancel-dry">Cancel</button>' +
+            '</div></div>';
+        self.resultsEl.innerHTML = wrapper;
+
+        // Wire up the execute button
+        self.resultsEl.querySelector('[data-action="run-confirmed"]').addEventListener('click', function() {
+            self.runQuery('run');
+        });
+        self.resultsEl.querySelector('[data-action="cancel-dry"]').addEventListener('click', function() {
+            self.resultsEl.innerHTML = '<div class="empty-state">Cancelled</div>';
+        });
+        self.updateStatus('Dry run complete');
     })
     .catch(function(err) {
         self.resultsEl.innerHTML = '<div class="query-error">' + esc(err.message) + '</div>';
@@ -968,43 +1187,203 @@ SQLEditorInstance.prototype.runQuery = function(mode) {
     });
 };
 
-SQLEditorInstance.prototype.getSelectedOrAll = function() {
-    var ta = this.textarea;
-    if (ta.selectionStart !== ta.selectionEnd) {
-        return ta.value.substring(ta.selectionStart, ta.selectionEnd);
-    }
-    return ta.value;
-};
-
 // ─── History ─────────────────────────────────────────────────────────
 
-SQLEditorInstance.prototype.pushHistory = function(sql) {
+SQLEditorInstance.prototype.pushHistory = function(sql, meta) {
     sql = sql.trim();
     if (!sql) return;
-    // Remove duplicate if it's the most recent
-    if (this.history.length > 0 && this.history[this.history.length - 1] === sql) return;
-    this.history.push(sql);
-    if (this.history.length > 100) this.history.shift();
+    meta = meta || {};
+    // History entries are objects: { sql, ms, rows, ts }
+    var entry = { sql: sql, ms: meta.ms || 0, rows: meta.rows || 0, ts: Date.now() };
+    // Remove duplicate if most recent has same SQL
+    if (this.history.length > 0 && this.history[this.history.length - 1].sql === sql) {
+        this.history[this.history.length - 1] = entry; // update metadata
+    } else {
+        this.history.push(entry);
+    }
+    if (this.history.length > 200) this.history.shift();
     this.historyIdx = -1;
     try { localStorage.setItem('getgresql_history', JSON.stringify(this.history)); } catch (e) {}
 };
 
+// Migrate old string-only history to new object format
+SQLEditorInstance.prototype.migrateHistory = function() {
+    for (var i = 0; i < this.history.length; i++) {
+        if (typeof this.history[i] === 'string') {
+            this.history[i] = { sql: this.history[i], ms: 0, rows: 0, ts: 0 };
+        }
+    }
+};
+
 SQLEditorInstance.prototype.showHistory = function() {
+    this.migrateHistory();
     if (this.history.length === 0) {
         this.resultsEl.innerHTML = '<div class="empty-state">No query history</div>';
         return;
     }
-    var html = '<div style="padding:var(--sp-4)"><h3>Query History</h3>';
-    html += '<div class="table-wrapper scrollable"><table><thead><tr><th>#</th><th>Query</th><th></th></tr></thead><tbody>';
+    var self = this;
+    var html = '<div class="history-panel"><div class="history-header">' +
+        '<h3>Query History</h3>' +
+        '<input type="search" class="history-search" placeholder="Search history...">' +
+        '</div>';
+    html += '<div class="table-wrapper scrollable" style="max-height:calc(100vh - 340px)">' +
+        '<table class="history-table"><thead><tr>' +
+        '<th style="width:36px">#</th><th>Query</th>' +
+        '<th style="width:70px">Time</th><th style="width:60px">Rows</th>' +
+        '<th style="width:100px">When</th><th style="width:80px"></th>' +
+        '</tr></thead><tbody>';
     for (var i = this.history.length - 1; i >= 0; i--) {
-        var q = this.history[i];
-        var preview = q.length > 120 ? q.substring(0, 120) + '...' : q;
-        html += '<tr><td class="num">' + (i + 1) + '</td>';
+        var h = this.history[i];
+        var preview = h.sql.length > 120 ? h.sql.substring(0, 120) + '...' : h.sql;
+        var timeAgo = h.ts ? this.formatTimeAgo(h.ts) : '';
+        html += '<tr data-history-row>';
+        html += '<td class="num">' + (i + 1) + '</td>';
         html += '<td><code class="query-preview" style="white-space:pre-wrap;max-width:none">' + esc(preview) + '</code></td>';
-        html += '<td><button class="btn btn-sm" data-history-load="' + i + '">Load</button></td></tr>';
+        html += '<td class="mono" style="color:var(--text-3)">' + (h.ms ? h.ms + ' ms' : '') + '</td>';
+        html += '<td class="mono" style="color:var(--text-3)">' + (h.rows || '') + '</td>';
+        html += '<td style="color:var(--text-3);font-size:var(--font-size-xs)">' + esc(timeAgo) + '</td>';
+        html += '<td><button class="btn btn-sm btn-primary" data-history-load="' + i + '">Load</button> ' +
+                '<button class="btn btn-sm" data-history-run="' + i + '">Run</button></td>';
+        html += '</tr>';
     }
     html += '</tbody></table></div></div>';
     this.resultsEl.innerHTML = html;
+
+    // Search filter
+    var search = this.resultsEl.querySelector('.history-search');
+    if (search) {
+        search.focus();
+        search.addEventListener('input', function() {
+            var q = search.value.toLowerCase();
+            self.resultsEl.querySelectorAll('[data-history-row]').forEach(function(row) {
+                row.style.display = row.textContent.toLowerCase().indexOf(q) !== -1 ? '' : 'none';
+            });
+        });
+    }
+};
+
+SQLEditorInstance.prototype.formatTimeAgo = function(ts) {
+    var diff = Date.now() - ts;
+    if (diff < 60000) return 'just now';
+    if (diff < 3600000) return Math.floor(diff / 60000) + 'm ago';
+    if (diff < 86400000) return Math.floor(diff / 3600000) + 'h ago';
+    if (diff < 604800000) return Math.floor(diff / 86400000) + 'd ago';
+    return new Date(ts).toLocaleDateString();
+};
+
+// ─── Result Diff ────────────────────────────────────────────────────
+
+SQLEditorInstance.prototype.showDiff = function() {
+    var self = this;
+    // Snapshot current grid data
+    var currentData = this.extractGridData();
+    if (!currentData) {
+        this._diffSnapshot = null;
+        // No visible results - take a snapshot for next time
+        this.resultsEl.insertAdjacentHTML('afterbegin',
+            '<div class="diff-notice">No results to diff. Run a query first, then click Diff to snapshot, run again, and click Diff to compare.</div>');
+        return;
+    }
+
+    if (!this._diffSnapshot) {
+        // First click: take snapshot
+        this._diffSnapshot = currentData;
+        this.updateStatus('Snapshot saved — run query again then click Diff');
+        this.resultsEl.insertAdjacentHTML('afterbegin',
+            '<div class="diff-notice">Snapshot taken (' + currentData.rows.length + ' rows). Run query again and click Diff to compare.</div>');
+        return;
+    }
+
+    // Second click: compare
+    var prev = this._diffSnapshot;
+    var curr = currentData;
+    this._diffSnapshot = currentData; // save for next diff
+
+    // Build diff view
+    var html = '<div class="diff-result"><div class="diff-header">Result Diff: ' +
+        prev.rows.length + ' rows &rarr; ' + curr.rows.length + ' rows</div>';
+
+    // Index rows by a key (all columns concatenated)
+    var prevMap = {}, currMap = {};
+    prev.rows.forEach(function(r, i) { var k = r.join('\x00'); prevMap[k] = i; });
+    curr.rows.forEach(function(r, i) { var k = r.join('\x00'); currMap[k] = i; });
+
+    var added = 0, removed = 0, unchanged = 0;
+    curr.rows.forEach(function(r) { var k = r.join('\x00'); if (!(k in prevMap)) added++; else unchanged++; });
+    prev.rows.forEach(function(r) { var k = r.join('\x00'); if (!(k in currMap)) removed++; });
+
+    html += '<div class="diff-stats">' +
+        '<span class="diff-stat diff-added">+' + added + ' added</span> ' +
+        '<span class="diff-stat diff-removed">-' + removed + ' removed</span> ' +
+        '<span class="diff-stat diff-same">' + unchanged + ' unchanged</span></div>';
+
+    // Render table
+    var cols = curr.headers.length > 0 ? curr.headers : prev.headers;
+    html += '<div class="table-wrapper scrollable" style="max-height:calc(100vh - 340px)"><table class="dv-table"><thead><tr>';
+    html += '<th style="width:24px"></th>';
+    cols.forEach(function(c) { html += '<th>' + esc(c) + '</th>'; });
+    html += '</tr></thead><tbody>';
+
+    // Removed rows (in prev but not in curr)
+    prev.rows.forEach(function(r) {
+        var k = r.join('\x00');
+        if (k in currMap) return;
+        html += '<tr class="diff-row-removed"><td class="diff-marker">-</td>';
+        r.forEach(function(v) { html += '<td>' + esc(v) + '</td>'; });
+        html += '</tr>';
+    });
+
+    // Current rows — highlight added
+    curr.rows.forEach(function(r) {
+        var k = r.join('\x00');
+        var isNew = !(k in prevMap);
+        html += '<tr class="' + (isNew ? 'diff-row-added' : '') + '">';
+        html += '<td class="diff-marker">' + (isNew ? '+' : '') + '</td>';
+        // Cell-level diff for changed rows
+        r.forEach(function(v, ci) {
+            var prevRow = prevMap[k] !== undefined ? prev.rows[prevMap[k]] : null;
+            if (!isNew && prevRow && ci < prevRow.length && prevRow[ci] !== v) {
+                html += '<td class="diff-cell-changed">' + esc(v) + '</td>';
+            } else {
+                html += '<td>' + esc(v) + '</td>';
+            }
+        });
+        html += '</tr>';
+    });
+
+    html += '</tbody></table></div></div>';
+    this.resultsEl.innerHTML = html;
+    this.updateStatus('Diff: +' + added + ' -' + removed);
+};
+
+SQLEditorInstance.prototype.extractGridData = function() {
+    var table = this.resultsEl.querySelector('.dv-table');
+    if (!table) return null;
+    var headers = [];
+    var headerCells = table.tHead ? table.tHead.rows[0].cells : [];
+    for (var i = 0; i < headerCells.length; i++) {
+        var text = headerCells[i].querySelector('.dv-th-text');
+        if (text) headers.push(text.textContent.trim());
+        else if (!headerCells[i].classList.contains('row-num-header') && !headerCells[i].classList.contains('dv-actions-header'))
+            headers.push(headerCells[i].textContent.trim());
+    }
+    var rows = [];
+    var tbody = table.tBodies[0];
+    if (!tbody) return { headers: headers, rows: rows };
+    var colStart = table.querySelector('.row-num-header') ? 1 : 0;
+    for (var r = 0; r < tbody.rows.length; r++) {
+        var row = [];
+        for (var c = colStart; c < tbody.rows[r].cells.length; c++) {
+            var td = tbody.rows[r].cells[c];
+            if (td.classList.contains('dv-actions')) continue;
+            var span = td.querySelector('.editable-cell, .dv-cell');
+            if (span && span.getAttribute('data-full')) row.push(span.getAttribute('data-full'));
+            else if (span) row.push(span.textContent);
+            else row.push(td.textContent.trim());
+        }
+        rows.push(row);
+    }
+    return { headers: headers, rows: rows };
 };
 
 // ─── Find / Replace ──────────────────────────────────────────────────
@@ -1364,6 +1743,8 @@ SQLEditorInstance.prototype.bindEvents = function() {
         if (action === 'run') self.runQuery('run');
         else if (action === 'explain') self.runQuery('explain');
         else if (action === 'explain-analyze') self.runQuery('explain-analyze');
+        else if (action === 'dry-run') self.runQuery('dry-run');
+        else if (action === 'diff') self.showDiff();
         else if (action === 'find') self.toggleFind();
         else if (action === 'format') self.formatSQL();
         else if (action === 'history') self.showHistory();
@@ -1420,17 +1801,33 @@ SQLEditorInstance.prototype.bindEvents = function() {
         }
     });
 
-    // Results: load history item
+    // Results: load or run history item
     this.resultsEl.addEventListener('click', function(e) {
-        var btn = e.target.closest('[data-history-load]');
-        if (btn) {
-            var idx = parseInt(btn.getAttribute('data-history-load'));
+        var loadBtn = e.target.closest('[data-history-load]');
+        if (loadBtn) {
+            var idx = parseInt(loadBtn.getAttribute('data-history-load'));
+            self.migrateHistory();
             if (self.history[idx]) {
-                ta.value = self.history[idx];
+                var entry = self.history[idx];
+                ta.value = typeof entry === 'string' ? entry : entry.sql;
                 self.syncHighlight();
                 self.updateGutter();
                 ta.focus();
             }
+            return;
+        }
+        var runBtn = e.target.closest('[data-history-run]');
+        if (runBtn) {
+            var idx = parseInt(runBtn.getAttribute('data-history-run'));
+            self.migrateHistory();
+            if (self.history[idx]) {
+                var entry = self.history[idx];
+                ta.value = typeof entry === 'string' ? entry : entry.sql;
+                self.syncHighlight();
+                self.updateGutter();
+                self.runQuery('run');
+            }
+            return;
         }
     });
 

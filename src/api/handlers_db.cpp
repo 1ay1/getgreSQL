@@ -705,7 +705,6 @@ auto TableBrowseHandler::handle(Request& req, AppContext& ctx) -> Response {
     auto limit_str = req.query("limit");
     auto sort_col = req.query("sort");
     auto sort_dir = req.query("dir");
-
     int page = 1, limit = 50;
     if (!page_str.empty()) try { page = std::stoi(std::string(page_str)); } catch (...) {}
     if (!limit_str.empty()) try { limit = std::stoi(std::string(limit_str)); } catch (...) {}
@@ -737,13 +736,13 @@ auto TableBrowseHandler::handle(Request& req, AppContext& ctx) -> Response {
 
     auto base_url = std::format("/db/{}/schema/{}/table/{}/browse", db_name, schema_name, table_name);
 
-    auto h = Html::with_capacity(16384);
-
     // Build column metadata (skip column 0 = ctid)
     std::vector<DCol> cols;
     for (int c = 1; c < result->col_count(); ++c) {
         cols.push_back({result->column_name(c)});
     }
+
+    auto h = Html::with_capacity(16384);
 
     {
         // Type-state: Editable view — row() would be a compile error here

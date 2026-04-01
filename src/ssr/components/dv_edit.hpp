@@ -233,18 +233,54 @@ struct DvLineagePanel {
             // Stats
             section(h, "Table Stats", s.table_size + " &middot; ~" + s.approx_rows + " rows");
 
-            // Foreign keys (outgoing joins)
+            // Foreign keys (outgoing joins) — with clickable navigation
             if (!p.fks.empty()) {
                 auto fk_html = std::string();
-                for (auto& fk : p.fks) fk_html += "<div><code>" + fk.name + "</code>: " + fk.definition + "</div>";
+                for (auto& fk : p.fks) {
+                    fk_html += "<div><code>" + fk.name + "</code>: ";
+                    // Parse REFERENCES schema.table from definition and make it a link
+                    auto ref_pos = fk.definition.find("REFERENCES ");
+                    if (ref_pos != std::string::npos) {
+                        auto before = fk.definition.substr(0, ref_pos + 11);
+                        auto rest = fk.definition.substr(ref_pos + 11);
+                        // Extract schema.table (possibly quoted)
+                        auto paren = rest.find('(');
+                        auto ref_table = (paren != std::string::npos) ? rest.substr(0, paren) : rest;
+                        // Strip quotes for URL
+                        auto clean = std::string();
+                        for (auto c : ref_table) { if (c != '"' && c != ' ') clean += c; }
+                        auto dot = clean.find('.');
+                        if (dot != std::string::npos) {
+                            auto ref_schema = clean.substr(0, dot);
+                            auto ref_name = clean.substr(dot + 1);
+                            fk_html += before + "<a href=\"/db/postgres/schema/" + ref_schema +
+                                "/table/" + ref_name + "\" data-spa>" + ref_table + "</a>";
+                            if (paren != std::string::npos) fk_html += rest.substr(paren);
+                        } else {
+                            fk_html += fk.definition;
+                        }
+                    } else {
+                        fk_html += fk.definition;
+                    }
+                    fk_html += "</div>";
+                }
                 section(h, "Joins &rarr; (FK references)", fk_html);
             }
 
-            // Reverse foreign keys (incoming joins)
+            // Reverse foreign keys (incoming joins) — with clickable navigation
             if (!p.reverse_fks.empty()) {
                 auto rfk_html = std::string();
                 for (auto& rfk : p.reverse_fks) {
-                    rfk_html += "<div><code>" + rfk.source_table + "</code> via <code>" + rfk.name + "</code></div>";
+                    auto dot = rfk.source_table.find('.');
+                    if (dot != std::string::npos) {
+                        auto ref_schema = rfk.source_table.substr(0, dot);
+                        auto ref_name = rfk.source_table.substr(dot + 1);
+                        rfk_html += "<div><a href=\"/db/postgres/schema/" + ref_schema +
+                            "/table/" + ref_name + "\" data-spa><code>" + rfk.source_table +
+                            "</code></a> via <code>" + rfk.name + "</code></div>";
+                    } else {
+                        rfk_html += "<div><code>" + rfk.source_table + "</code> via <code>" + rfk.name + "</code></div>";
+                    }
                 }
                 section(h, "Joins &larr; (referenced by)", rfk_html);
             }
