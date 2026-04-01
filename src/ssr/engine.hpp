@@ -16,6 +16,8 @@
 //   StatCard::render()  — ~200ns
 //   Full dashboard page — ~5μs (excluding DB queries)
 
+#include "ssr/safe_html.hpp"
+
 #include <cstring>
 #include <concepts>
 #include <string>
@@ -153,6 +155,15 @@ public:
         return *this;
     }
 
+    // ── Type-safe emit — only accepts SafeHtml types ──────────
+    // These are the preferred way to output content from components.
+    // raw() still exists for trusted HTML literals in component code.
+
+    template<typename Safety>
+    auto emit(const HtmlString<Safety>& s) -> Html& {
+        return raw(s.view());
+    }
+
     // ── Tag helpers ─────────────────────────────────────────────
 
     auto open(std::string_view tag) -> Html& { return raw('<').raw(tag).raw('>'); }
@@ -193,9 +204,33 @@ concept Renderable = requires(T t, Html& h) {
 template<typename T>
 concept Component = requires {
     typename T::Props;
-} && requires(typename T::Props p, Html& h) {
+} && requires(const typename T::Props& p, Html& h) {
     { T::render(p, h) } -> std::same_as<void>;
 };
+
+// A component that accepts children (e.g. PageLayout wrapping content)
+template<typename T>
+concept ContainerComponent = requires {
+    typename T::Props;
+} && requires(const typename T::Props& p, Html& h, void(*fn)(Html&)) {
+    { T::render(p, h, fn) } -> std::same_as<void>;
+};
+
+// ── Component composition helpers ────────────────────────────────────
+
+// Render a component inline
+template<Component C>
+auto render_child(const typename C::Props& props, Html& h) -> void {
+    C::render(props, h);
+}
+
+// Render a component into a trusted HtmlString
+template<Component C>
+auto render_to_safe(const typename C::Props& props, std::size_t cap = 4096) -> HtmlString<Trusted> {
+    auto h = Html::with_capacity(cap);
+    C::render(props, h);
+    return trust(std::move(h).finish());
+}
 
 // ─── ScopedElement (RAII tag) ────────────────────────────────────────
 

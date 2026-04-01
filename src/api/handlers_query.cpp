@@ -98,17 +98,17 @@ auto QueryExecHandler::handle(Request& req, AppContext& ctx) -> Response {
     auto h = Html::with_capacity(16384);
 
     if (result->row_count() > 0 || result->col_count() > 0) {
-        // Build column list
-        std::vector<DataView::DCol> cols;
+        std::vector<DCol> cols;
         for (int c = 0; c < result->col_count(); ++c) {
             cols.push_back({result->column_name(c)});
         }
 
-        DataView::begin(h, {.row_count = result->row_count(), .exec_ms = static_cast<int>(ms)});
-        DataView::columns(h, cols);
+        // Type-state: ReadOnly view — editable_row() would be a compile error here
+        auto view = DataView::readonly(h, {.row_count = result->row_count(), .exec_ms = static_cast<int>(ms)});
+        view.columns(cols);
 
         for (auto row : *result) {
-            std::vector<DataView::Cell> cells;
+            std::vector<Cell> cells;
             for (int c = 0; c < row.col_count(); ++c) {
                 if (row.is_null(c)) {
                     cells.push_back({.is_null = true});
@@ -116,16 +116,16 @@ auto QueryExecHandler::handle(Request& req, AppContext& ctx) -> Response {
                     cells.push_back({.value = std::string(row[c])});
                 }
             }
-            DataView::row(h, cells);
+            view.row(cells);
         }
-        DataView::end(h);
+        // RAII: view destructor closes tags
     } else {
-        // Command result (INSERT, UPDATE, etc.)
         auto affected = std::string(result->affected_rows());
-        DataView::begin(h, {.row_count = affected.empty() ? 0 : std::stoi(affected),
-                            .exec_ms = static_cast<int>(ms),
-                            .command_tag = result->command_tag()});
-        DataView::end(h);
+        auto view = DataView::readonly(h, {
+            .row_count = affected.empty() ? 0 : std::stoi(affected),
+            .exec_ms = static_cast<int>(ms),
+            .command_tag = result->command_tag()});
+        // RAII: immediate close for command results (no rows)
     }
 
     return Response::html(std::move(h).finish());

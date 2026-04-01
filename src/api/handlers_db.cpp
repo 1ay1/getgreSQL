@@ -566,19 +566,20 @@ auto TableDataHandler::handle(Request& req, AppContext& ctx) -> Response {
     if (!result) return Response::error(error_message(result.error()));
 
     auto h = Html::with_capacity(16384);
-    std::vector<DataView::DCol> cols;
+    std::vector<DCol> cols;
     for (int c = 0; c < result->col_count(); ++c) cols.push_back({result->column_name(c)});
-    DataView::begin(h, {.row_count = result->row_count()});
-    DataView::columns(h, cols);
-    for (auto row : *result) {
-        std::vector<DataView::Cell> cells;
-        for (int c = 0; c < row.col_count(); ++c) {
-            if (row.is_null(c)) cells.push_back({.is_null = true});
-            else cells.push_back({.value = std::string(row[c])});
+    {
+        auto view = DataView::readonly(h, {.row_count = result->row_count()});
+        view.columns(cols);
+        for (auto row : *result) {
+            std::vector<Cell> cells;
+            for (int c = 0; c < row.col_count(); ++c) {
+                if (row.is_null(c)) cells.push_back({.is_null = true});
+                else cells.push_back({.value = std::string(row[c])});
+            }
+            view.row(cells);
         }
-        DataView::row(h, cells);
     }
-    DataView::end(h);
     return Response::html(std::move(h).finish());
 }
 
@@ -743,58 +744,54 @@ auto TableBrowseHandler::handle(Request& req, AppContext& ctx) -> Response {
     auto h = Html::with_capacity(16384);
 
     // Build column metadata (skip column 0 = ctid)
-    std::vector<DataView::DCol> cols;
+    std::vector<DCol> cols;
     for (int c = 1; c < result->col_count(); ++c) {
         cols.push_back({result->column_name(c)});
     }
 
-    DataView::begin(h, {
-        .row_count = result->row_count(),
-        .editable = true,
-        .db = db_name, .schema = schema_name, .table = table_name,
-        .page = page, .limit = limit, .total_rows = total_rows,
-        .base_url = base_url
-    });
-    DataView::columns(h, cols, /*with_row_num=*/true, /*with_actions=*/true);
-
-    // Render insert form fields (JS will populate from column headers,
-    // but we also render hidden fields for server-side form handling)
     {
-        auto insert_h = Html::with_capacity(2048);
-        for (int c = 1; c < result->col_count(); ++c) {
-            auto col_name = std::string(result->column_name(c));
-            insert_h.raw("<div class=\"insert-field\"><label>").text(col_name)
-             .raw("</label><input type=\"text\" name=\"col_").raw(std::to_string(c - 1))
-             .raw("\" placeholder=\"").text(col_name).raw("\" class=\"insert-input\"></div>");
-        }
-        // Inject into the insert form via a script that runs once
-        h.raw("<script>document.querySelector('#dv-insert-fields').innerHTML = '");
-        // We need to JS-escape the HTML
-        auto fields_html = std::move(insert_h).finish();
-        for (char c : fields_html) {
-            if (c == '\'') h.raw("\\'");
-            else if (c == '\\') h.raw("\\\\");
-            else if (c == '\n') h.raw("\\n");
-            else h.raw(c);
-        }
-        h.raw("';</script>");
-    }
+        // Type-state: Editable view — row() would be a compile error here
+        auto view = DataView::editable(h, {
+            .row_count = result->row_count(),
+            .db = db_name, .schema = schema_name, .table = table_name,
+            .page = page, .limit = limit, .total_rows = total_rows,
+            .base_url = base_url
+        });
+        view.columns(cols);
 
-    for (auto row : *result) {
-        auto ctid = std::string(row[0]); // ctid is column 0
-        auto row_num = offset + row.index() + 1;
-
-        std::vector<DataView::Cell> cells;
-        for (int c = 1; c < row.col_count(); ++c) {
-            if (row.is_null(c)) {
-                cells.push_back({.is_null = true});
-            } else {
-                cells.push_back({.value = std::string(row[c])});
+        // Inject insert form fields via inline script
+        {
+            auto insert_h = Html::with_capacity(2048);
+            for (int c = 1; c < result->col_count(); ++c) {
+                auto col_name = std::string(result->column_name(c));
+                insert_h.raw("<div class=\"insert-field\"><label>").text(col_name)
+                 .raw("</label><input type=\"text\" name=\"col_").raw(std::to_string(c - 1))
+                 .raw("\" placeholder=\"").text(col_name).raw("\" class=\"insert-input\"></div>");
             }
+            h.raw("<script>document.querySelector('#dv-insert-fields').innerHTML = '");
+            auto fields_html = std::move(insert_h).finish();
+            for (char ch : fields_html) {
+                if (ch == '\'') h.raw("\\'");
+                else if (ch == '\\') h.raw("\\\\");
+                else if (ch == '\n') h.raw("\\n");
+                else h.raw(ch);
+            }
+            h.raw("';</script>");
         }
-        DataView::editable_row(h, ctid, row_num, cols, cells, db_name, schema_name, table_name);
+
+        for (auto row : *result) {
+            auto ctid = std::string(row[0]);
+            auto row_num = offset + row.index() + 1;
+
+            std::vector<Cell> cells;
+            for (int c = 1; c < row.col_count(); ++c) {
+                if (row.is_null(c)) cells.push_back({.is_null = true});
+                else cells.push_back({.value = std::string(row[c])});
+            }
+            view.editable_row(ctid, row_num, cols, cells, db_name, schema_name, table_name);
+        }
+        // RAII: view destructor closes tags
     }
-    DataView::end(h);
 
     return Response::html(std::move(h).finish());
 }
