@@ -108,6 +108,57 @@ document.addEventListener('htmx:afterSettle', function() {
     treeHighlightCurrent();
 });
 
+// ─── Sidebar: Filter, Refresh, Collapse ──────────────────────────────────
+
+function sidebarCollapseAll() {
+    document.querySelectorAll('.tree-children.loaded').forEach(function(c) {
+        c.style.display = 'none';
+        var chev = c.closest('.tree-item').querySelector('.tree-chevron');
+        if (chev) chev.classList.remove('expanded');
+    });
+    treeSaveState();
+}
+
+function sidebarRefresh() {
+    var tree = document.getElementById('sidebar-tree');
+    if (tree) {
+        tree.innerHTML = '<div class="loading">Loading...</div>';
+        htmx.ajax('GET', '/tree', { target: '#sidebar-tree', swap: 'innerHTML' });
+    }
+}
+
+// Live filter — hides tree items that don't match the search
+(function() {
+    document.addEventListener('input', function(e) {
+        if (e.target.id !== 'sidebar-filter') return;
+        var q = e.target.value.toLowerCase().trim();
+        var items = document.querySelectorAll('#sidebar-tree .tree-item');
+        if (!q) {
+            items.forEach(function(li) { li.style.display = ''; });
+            return;
+        }
+        items.forEach(function(li) {
+            var text = li.querySelector('.tree-text');
+            if (!text) { li.style.display = ''; return; }
+            var match = text.textContent.toLowerCase().indexOf(q) !== -1;
+            li.style.display = match ? '' : 'none';
+            // If match, also show all parent tree-items
+            if (match) {
+                var parent = li.parentElement;
+                while (parent) {
+                    if (parent.classList && parent.classList.contains('tree-item')) parent.style.display = '';
+                    if (parent.classList && parent.classList.contains('tree-children')) {
+                        parent.style.display = '';
+                        var chev = parent.closest('.tree-item');
+                        if (chev) { chev.style.display = ''; var c = chev.querySelector('.tree-chevron'); if (c) c.classList.add('expanded'); }
+                    }
+                    parent = parent.parentElement;
+                }
+            }
+        });
+    });
+})();
+
 // ─── Section Tab Clicks ──────────────────────────────────────────────────
 // Handles data-tab-url tabs via fetch — more reliable than hx-* attributes
 // which can break after SPA navigation swaps the DOM.
