@@ -151,21 +151,8 @@
     background: var(--accent);
 }
 
-/* ─── Breadcrumbs ─────────────────────────────────────────────────────── */
-
-.breadcrumbs {
-    display: flex;
-    align-items: center;
-    gap: var(--sp-2);
-    margin-bottom: var(--sp-4);
-    font-size: var(--font-size-sm);
-}
-.bc-sep { color: var(--text-4); font-size: 10px; }
-.bc-current { color: var(--text-0); font-weight: 600; }
-.bc-link { color: var(--text-2); transition: color var(--transition-fast); }
-.bc-link:hover { color: var(--accent); }
-
-/* ─── Alerts ──────────────────────────────────────────────────────────── */
+/* Breadcrumbs: co-located in breadcrumbs.hpp */
+/* Alerts: co-located in alert.hpp */
 
 /* Alert: co-located in src/ssr/components/alert.hpp */
 
@@ -283,25 +270,7 @@
     font-family: var(--font-mono);
 }
 
-/* ─── Progress bar ────────────────────────────────────────────────────── */
-
-.progress {
-    height: 4px;
-    background: var(--bg-4);
-    border-radius: 2px;
-    overflow: hidden;
-    margin-top: var(--sp-2);
-}
-
-.progress-bar {
-    height: 100%;
-    background: var(--accent);
-    border-radius: 2px;
-    transition: width 0.3s ease;
-}
-.progress-success { background: var(--success); }
-.progress-warning { background: var(--warning); }
-.progress-danger { background: var(--danger); }
+/* ProgressBar: co-located in progress_bar.hpp */
 
 /* ─── EXPLAIN plan ────────────────────────────────────────────────────── */
 
@@ -365,46 +334,8 @@
 
 .row-warning td { background: var(--warning-subtle); }
 
-/* ─── Size bar chart ──────────────────────────────────────────────────── */
-
-.size-bar {
-    width: 100px;
-    min-width: 60px;
-    height: 6px;
-    background: var(--bg-3);
-    border-radius: 3px;
-    overflow: hidden;
-}
-
-.size-bar-fill {
-    height: 100%;
-    background: var(--accent);
-    border-radius: 3px;
-    min-width: 2px;
-    transition: width 0.3s ease;
-}
-
-/* ─── Search box ──────────────────────────────────────────────────────── */
-
-.search-box { margin-bottom: var(--sp-4); }
-
-.search-input {
-    width: 100%;
-    max-width: 360px;
-    padding: var(--sp-2) var(--sp-3);
-    background: var(--bg-1);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    color: var(--text-0);
-    font-size: var(--font-size-sm);
-    font-family: var(--font-sans);
-    outline: none;
-    transition: border-color var(--transition-normal), box-shadow var(--transition-normal);
-}
-.search-input:focus {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 3px var(--accent-subtle);
-}
+/* SizeBar: co-located in size_bar.hpp */
+/* SearchInput: co-located in search_input.hpp */
 
 /* ─── Command palette ─────────────────────────────────────────────────── */
 

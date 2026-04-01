@@ -9,6 +9,22 @@ namespace getgresql::ssr {
 struct Col { std::string_view header; std::string_view cls = ""; bool sortable = false; };
 
 struct Table {
+    static constexpr auto css() -> std::string_view { return R"(
+.table-wrapper { border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--shadow-sm); }
+.table-wrapper.scrollable { overflow: auto; max-height: calc(100vh - 300px); }
+table { width: 100%; table-layout: auto; border-collapse: collapse; }
+th { position: sticky; top: 0; z-index: 1; background: var(--bg-2); font-weight: 600; text-align: left; padding: 5px 8px; font-size: var(--font-size-xs); border-bottom: 1px solid var(--border); white-space: nowrap; user-select: none; }
+th.sortable { cursor: pointer; }
+th.sortable:hover { background: var(--bg-3); }
+td { padding: 4px 8px; font-size: var(--font-size-xs); border-bottom: 1px solid var(--border-subtle); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 400px; }
+tbody tr:nth-child(even) td { background: rgba(255,255,255,0.01); }
+tbody tr:hover td { background: rgba(56,139,253,0.04); }
+tbody tr:last-child td { border-bottom: none; }
+.num { text-align: right; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.wide { max-width: 500px; word-break: break-all; white-space: normal; }
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: var(--sp-3); margin-bottom: var(--sp-4); }
+)"; }
+
     static auto begin(Html& h, std::initializer_list<Col> columns, std::string_view id = "") -> void {
         begin_impl(h, columns, id);
     }

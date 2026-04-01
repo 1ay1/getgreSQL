@@ -8,6 +8,14 @@ namespace getgresql::ssr {
 struct Crumb { std::string label; std::string href; };
 
 struct Breadcrumbs {
+    static constexpr auto css() -> std::string_view { return R"(
+.breadcrumbs { display: flex; align-items: center; gap: 2px; margin-bottom: var(--sp-4); font-size: var(--font-size-sm); flex-wrap: wrap; }
+.bc-sep { color: var(--text-4); font-size: 10px; }
+.bc-current { color: var(--text-0); font-weight: 600; }
+.bc-link { color: var(--text-2); transition: color var(--transition-fast); }
+.bc-link:hover { color: var(--accent); text-decoration: none; }
+)"; }
+
     static auto render(std::initializer_list<Crumb> il, Html& h) -> void {
         std::vector<Crumb> items(il); render(items, h);
     }
