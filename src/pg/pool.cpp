@@ -87,4 +87,15 @@ auto Pool::active_count() const -> std::size_t {
     return active_count_;
 }
 
+auto Pool::reconnect(std::string new_connstr) -> Result<void> {
+    // Drain idle connections and switch to new connection string
+    {
+        std::lock_guard lock(mutex_);
+        idle_.clear();
+        connstr_ = std::move(new_connstr);
+    }
+    // Warm with 2 connections to verify the new string works
+    return warm(2);
+}
+
 } // namespace getgresql::pg

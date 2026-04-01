@@ -46,15 +46,34 @@ public:
         , ctx_(ctx)
         , dispatch_(std::move(dispatch))
         , threads_(threads)
-    {
+    {}
+
+    // Bind and listen. Returns false if the port is already in use.
+    auto listen() -> bool {
         auto const address = asio::ip::make_address(ctx_.config.bind_address);
         auto const port = ctx_.config.port;
 
         asio::ip::tcp::endpoint endpoint{address, port};
-        acceptor_.open(endpoint.protocol());
-        acceptor_.set_option(asio::socket_base::reuse_address(true));
-        acceptor_.bind(endpoint);
-        acceptor_.listen(asio::socket_base::max_listen_connections);
+        boost::system::error_code ec;
+
+        acceptor_.open(endpoint.protocol(), ec);
+        if (ec) {
+            std::println(stderr, "Error: {}", ec.message());
+            return false;
+        }
+        acceptor_.set_option(asio::socket_base::reuse_address(true), ec);
+        acceptor_.bind(endpoint, ec);
+        if (ec) {
+            std::println(stderr, "Error: port {} is already in use ({})",
+                         port, ec.message());
+            return false;
+        }
+        acceptor_.listen(asio::socket_base::max_listen_connections, ec);
+        if (ec) {
+            std::println(stderr, "Error: {}", ec.message());
+            return false;
+        }
+        return true;
     }
 
     void run() {

@@ -23,6 +23,7 @@ struct EditorCSS {
     min-height: 120px;
     border-bottom: 2px solid var(--border);
     flex-shrink: 0;
+    position: relative;
 }
 
 .editor-container {
@@ -157,6 +158,31 @@ struct EditorCSS {
 .editor-resize:hover,
 .editor-resize.dragging {
     background: var(--accent);
+}
+
+/* ─── File drop overlay ──────────────────────────────────────────────── */
+
+.editor-drop-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(56, 139, 253, 0.12);
+    border: 2px dashed var(--accent);
+    border-radius: var(--radius);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    pointer-events: none;
+}
+
+.editor-drop-message {
+    padding: var(--sp-4) var(--sp-5);
+    background: var(--bg-2);
+    border-radius: var(--radius);
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    color: var(--accent);
+    box-shadow: var(--shadow);
 }
 
 /* Breadcrumbs: co-located in breadcrumbs.hpp */
@@ -3482,6 +3508,48 @@ SQLEditorInstance.prototype.bindEvents = function() {
         document.body.style.cursor = '';
         document.body.style.userSelect = '';
         self.resizeHandle.classList.remove('dragging');
+    });
+
+    // ─── File drag & drop ──────────────────────────────────────────────
+    var dropOverlay = document.createElement('div');
+    dropOverlay.className = 'editor-drop-overlay';
+    dropOverlay.innerHTML = '<div class="editor-drop-message">Drop .sql file to load</div>';
+    dropOverlay.style.display = 'none';
+    this.editorRegion.appendChild(dropOverlay);
+
+    var dragCounter = 0;
+    this.editorRegion.addEventListener('dragenter', function(e) {
+        e.preventDefault();
+        dragCounter++;
+        dropOverlay.style.display = 'flex';
+    });
+    this.editorRegion.addEventListener('dragleave', function(e) {
+        e.preventDefault();
+        dragCounter--;
+        if (dragCounter <= 0) { dropOverlay.style.display = 'none'; dragCounter = 0; }
+    });
+    this.editorRegion.addEventListener('dragover', function(e) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+    });
+    this.editorRegion.addEventListener('drop', function(e) {
+        e.preventDefault();
+        dragCounter = 0;
+        dropOverlay.style.display = 'none';
+
+        var files = e.dataTransfer.files;
+        if (files.length === 0) return;
+
+        // Load each file as a new tab
+        Array.from(files).forEach(function(file) {
+            var reader = new FileReader();
+            reader.onload = function(ev) {
+                var content = ev.target.result;
+                var name = file.name.replace(/\.sql$/i, '');
+                self.addTab(name, content);
+            };
+            reader.readAsText(file);
+        });
     });
 
     // Initial sync

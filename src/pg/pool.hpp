@@ -61,6 +61,12 @@ public:
     // Pre-warm the pool with N connections
     auto warm(std::size_t count) -> Result<void>;
 
+    // Reconnect: drain idle connections, switch to a new connection string
+    auto reconnect(std::string new_connstr) -> Result<void>;
+
+    // Current connection string
+    auto connstr() const -> const std::string& { return connstr_; }
+
     // Stats
     auto idle_count() const -> std::size_t;
     auto active_count() const -> std::size_t;

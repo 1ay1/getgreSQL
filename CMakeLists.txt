@@ -25,7 +25,9 @@ add_executable(getgresql
     src/api/handlers_schema.cpp
     src/api/handlers_tree.cpp
     src/api/handlers_static.cpp
+    src/api/handlers_connections.cpp
     src/config/config.cpp
+    src/config/connections.cpp
 )
 
 target_include_directories(getgresql PRIVATE src)

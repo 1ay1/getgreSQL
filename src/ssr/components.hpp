@@ -59,6 +59,7 @@
 #include "ssr/components/page_layout.hpp"
 #include "ssr/components/editor_css.hpp"
 #include "ssr/components/dashboard_css.hpp"
+#include "ssr/components/connections_css.hpp"
 
 // ─── Polish (last — animations, transitions, print) ─────────────────
 #include "ssr/components/polish_css.hpp"
@@ -80,7 +81,7 @@ using AllComponents = meta::TypeList<
     CellEditing, ContextMenu,
     DataViewCSS, DvLineagePanel,
     ExplainViz, ERDWidget,
-    EditorCSS, DashboardCSS,
+    EditorCSS, DashboardCSS, ConnectionsCSS,
     PolishCSS
 >;
 

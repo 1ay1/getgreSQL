@@ -69,6 +69,9 @@ private:
             h.raw("\" data-spa><span class=\"icon\">").raw(n.icon).raw("</span> ").raw(n.label).raw("</a>");
         }
         h.raw("  </nav>\n  <span class=\"toolbar-spacer\"></span>\n"
+              "  <a href=\"/connections\" class=\"toolbar-conn\" title=\"Manage Connections\">"
+              "<span class=\"conn-dot\"></span>"
+              "<span class=\"conn-label\" id=\"toolbar-db\">Connected</span></a>\n"
               "  <div class=\"toolbar-actions\">\n"
               "    <button onclick=\"openCommandPalette()\" class=\"toolbar-icon-btn\" title=\"Command Palette (Ctrl+K)\">&#8984;</button>\n"
               "    <button onclick=\"toggleSidebar()\" class=\"toolbar-icon-btn\" title=\"Toggle Sidebar\">&#9776;</button>\n"
@@ -95,10 +98,11 @@ private:
 
     static auto render_status_bar(Html& h) -> void {
         h.raw("<footer class=\"status-bar\">\n"
-              "  <span class=\"status-item\"><span class=\"conn-dot\"></span> Connected</span>\n"
+              "  <span class=\"status-item\"><span class=\"conn-dot\"></span> <span id=\"status-db\">Connected</span></span>\n"
               "  <span class=\"status-sep\"></span>\n"
               "  <span class=\"status-item\" id=\"status-info\"></span>\n"
               "  <span class=\"status-spacer\"></span>\n"
+              "  <span class=\"status-item\"><a href=\"/connections\" style=\"color:inherit;text-decoration:none\">&#128268; Connections</a></span>\n"
               "  <span class=\"status-item\"><kbd>Ctrl+K</kbd> Command Palette</span>\n"
               "</footer>\n");
     }

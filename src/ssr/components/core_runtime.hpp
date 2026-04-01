@@ -307,6 +307,27 @@ document.addEventListener('click', function(e) {
     if (input) input.value = btn.getAttribute('data-analyze');
 });
 
+// ─── Toolbar connection info ──────────────────────────────────────────
+
+(function() {
+    function updateConnInfo() {
+        fetch('/api/connection-info')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                var el = document.getElementById('toolbar-db');
+                if (el) el.textContent = data.db;
+                var sb = document.getElementById('status-db');
+                if (sb) sb.textContent = data.db;
+            })
+            .catch(function() {});
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', updateConnInfo);
+    } else {
+        updateConnInfo();
+    }
+})();
+
 // ─── Query Editor Resize (vertical split) ────────────────────────────────
 
 (function() {

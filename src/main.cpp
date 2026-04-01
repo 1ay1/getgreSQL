@@ -45,6 +45,10 @@ int main(int argc, char* argv[]) {
     http::AppContext app_ctx{pool, *cfg};
     http::Server server(app_ctx, std::move(dispatch), cfg->threads);
 
+    if (!server.listen()) {
+        return 1;
+    }
+
     std::signal(SIGINT, [](int) { g_shutdown.store(true); });
     std::signal(SIGTERM, [](int) { g_shutdown.store(true); });
 

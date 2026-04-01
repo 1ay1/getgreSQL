@@ -67,6 +67,7 @@ var commandPaletteItems = [
     { label: 'Roles', icon: '\u265F', href: '/roles' },
     { label: 'Extensions', icon: '\u2756', href: '/extensions' },
     { label: 'Settings', icon: '\u2699', href: '/settings' },
+    { label: 'Connections', icon: '\u{1F50C}', href: '/connections' },
 ];
 
 function openCommandPalette() {
