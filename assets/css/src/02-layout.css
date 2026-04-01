@@ -167,33 +167,34 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: var(--sp-2) var(--sp-3);
+    padding: var(--sp-3) var(--sp-4);
     border-bottom: 1px solid var(--border-subtle);
-    min-height: 36px;
+    min-height: 40px;
     gap: var(--sp-2);
+    background: var(--bg-1);
 }
 
 .sidebar-title {
     font-size: var(--font-size-xs);
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--text-3);
+    letter-spacing: 0.08em;
+    color: var(--text-2);
     user-select: none;
     flex-shrink: 0;
 }
 
 .sidebar-actions {
     display: flex;
-    gap: var(--sp-1);
+    gap: 2px;
 }
 
 .sidebar-icon {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 24px;
-    height: 24px;
+    width: 26px;
+    height: 26px;
     border: none;
     border-radius: var(--radius);
     background: transparent;
@@ -206,6 +207,9 @@
     background: var(--bg-3);
     color: var(--text-0);
 }
+.sidebar-icon:active {
+    transform: scale(0.92);
+}
 
 /* Sidebar search */
 .sidebar-search {
@@ -214,7 +218,7 @@
 }
 .sidebar-search-input {
     width: 100%;
-    padding: 4px 8px 4px 26px;
+    padding: 5px 8px 5px 28px;
     background: var(--bg-0);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius);
@@ -222,14 +226,15 @@
     font-size: var(--font-size-xs);
     font-family: var(--font-sans);
     outline: none;
-    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast), background var(--transition-fast);
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%236e7681' stroke-width='2'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cline x1='21' y1='21' x2='16.65' y2='16.65'/%3E%3C/svg%3E");
     background-repeat: no-repeat;
-    background-position: 6px center;
+    background-position: 7px center;
 }
 .sidebar-search-input:focus {
     border-color: var(--accent);
     box-shadow: 0 0 0 2px var(--accent-subtle);
+    background-color: color-mix(in srgb, var(--bg-0) 90%, var(--accent-subtle));
 }
 .sidebar-search-input::placeholder { color: var(--text-4); }
 
@@ -237,7 +242,9 @@
     flex: 1;
     overflow-y: auto;
     overflow-x: hidden;
-    padding: var(--sp-1) 0;
+    padding: var(--sp-2) 0;
+    scrollbar-width: thin;
+    scrollbar-color: var(--bg-4) transparent;
 }
 
 .sidebar-tree::-webkit-scrollbar { width: 5px; }
@@ -254,44 +261,66 @@
 
 .tree-item {
     user-select: none;
+    position: relative;
+}
+
+/* Indent guide lines — subtle vertical connectors showing hierarchy */
+.tree-children {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    position: relative;
+}
+.tree-children::before {
+    content: '';
+    position: absolute;
+    left: calc(var(--sp-3) + var(--guide-depth, 0) * 14px + 6px);
+    top: 0;
+    bottom: 8px;
+    width: 1px;
+    background: var(--border-subtle);
+    pointer-events: none;
+    z-index: 1;
 }
 
 .tree-row {
     display: flex;
     align-items: center;
-    padding: 1px var(--sp-3);
+    padding: 0 var(--sp-3);
     padding-left: calc(var(--sp-3) + var(--tree-depth, 0) * 14px);
     cursor: pointer;
     color: var(--text-1);
     font-size: var(--font-size-xs);
-    transition: background 0.08s, color 0.08s;
-    min-height: 26px;
+    transition: background 0.08s ease, color 0.08s ease;
+    min-height: 28px;
     gap: 5px;
     text-decoration: none;
-    border-radius: 0;
-    margin: 0 var(--sp-1);
+    margin: 1px var(--sp-1);
     border-radius: var(--radius);
+    position: relative;
 }
 .tree-row:hover {
     background: var(--bg-2);
     text-decoration: none;
 }
+.tree-row:active {
+    background: var(--bg-3);
+}
 .tree-row.selected {
     background: var(--accent-subtle);
     color: var(--text-0);
+    position: relative;
 }
 .tree-row.selected::before {
     content: '';
     position: absolute;
     left: 0;
-    top: 0;
-    bottom: 0;
+    top: 2px;
+    bottom: 2px;
     width: 2px;
     background: var(--accent);
-    border-radius: 0 1px 1px 0;
-}
-.tree-row.selected {
-    position: relative;
+    border-radius: 0 2px 2px 0;
 }
 .tree-row.selected:hover {
     background: color-mix(in srgb, var(--accent-subtle) 80%, var(--bg-2));
@@ -306,72 +335,78 @@
 }
 
 .tree-chevron {
-    width: 14px;
-    height: 14px;
+    width: 16px;
+    height: 16px;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 9px;
+    font-size: 8px;
     color: var(--text-4);
-    transition: transform 0.15s ease, color 0.1s;
+    transition: transform 0.15s cubic-bezier(0.4, 0, 0.2, 1), color 0.1s;
     flex-shrink: 0;
+    border-radius: 3px;
 }
-.tree-row:hover .tree-chevron { color: var(--text-2); }
+.tree-row:hover .tree-chevron {
+    color: var(--text-2);
+    background: rgba(255,255,255,0.04);
+}
 .tree-chevron.expanded { transform: rotate(90deg); }
-.tree-chevron.empty { visibility: hidden; width: 14px; }
+.tree-chevron.empty { visibility: hidden; width: 16px; }
 
 .tree-icon {
-    width: 16px;
-    height: 16px;
+    width: 18px;
+    height: 18px;
     display: flex;
     align-items: center;
     justify-content: center;
     font-size: 11px;
     flex-shrink: 0;
     color: var(--text-3);
-    transition: color 0.1s;
+    transition: color 0.1s, transform 0.1s;
+    border-radius: 3px;
 }
-.tree-row:hover .tree-icon { filter: brightness(1.2); }
+.tree-row:hover .tree-icon {
+    filter: brightness(1.15);
+    transform: scale(1.05);
+}
 
-/* Icon colors — each type gets a distinct, muted hue */
-.tree-icon.db       { color: #e5a00d; }
+/* Icon colors — each type gets a distinct, saturated hue */
+.tree-icon.db       { color: #f0b429; }
 .tree-icon.schema   { color: #a78bfa; }
-.tree-icon.table    { color: var(--accent); }
-.tree-icon.view     { color: #c084fc; }
+.tree-icon.table    { color: #58a6ff; }
+.tree-icon.view     { color: #bc85fa; }
 .tree-icon.func     { color: #fb923c; }
 .tree-icon.seq      { color: #22d3ee; }
-.tree-icon.idx      { color: var(--success); }
+.tree-icon.idx      { color: #3fb950; }
 .tree-icon.role     { color: #f472b6; }
 .tree-icon.ext      { color: #a78bfa; }
 .tree-icon.settings { color: var(--text-3); }
-.tree-icon.folder   { color: var(--text-4); }
-.tree-icon.monitor  { color: var(--warning); }
+.tree-icon.folder   { color: var(--text-3); }
+.tree-icon.monitor  { color: #d29922; }
 
 .tree-text {
     flex: 1;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    line-height: 1.3;
+    line-height: 1.4;
+    font-family: var(--font-sans);
 }
 
 .tree-badge {
-    font-size: 0.65rem;
+    font-size: 0.6rem;
     color: var(--text-4);
     font-family: var(--font-mono);
-    padding: 0 var(--sp-1);
+    padding: 1px 5px;
     flex-shrink: 0;
-    opacity: 0.7;
+    background: var(--bg-2);
+    border-radius: 3px;
+    opacity: 0;
+    transition: opacity 0.15s;
 }
 .tree-row:hover .tree-badge { opacity: 1; }
-
-.tree-children {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    /* Smooth expand/collapse animation */
-    overflow: hidden;
-}
+/* Always show badge on selected rows */
+.tree-row.selected .tree-badge { opacity: 0.8; }
 
 .tree-group-label {
     display: flex;
@@ -392,7 +427,8 @@
 .tree-separator {
     height: 0;
     border-top: 1px solid var(--border-subtle);
-    margin: var(--sp-2) var(--sp-3);
+    margin: var(--sp-3) var(--sp-4);
+    opacity: 0.6;
 }
 
 /* ─── Resize Handle ───────────────────────────────────────────────────── */

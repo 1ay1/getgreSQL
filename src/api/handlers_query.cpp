@@ -152,7 +152,7 @@ auto QueryExecHandler::handle(Request& req, AppContext& ctx) -> Response {
         auto view = DataView::readonly(h, {
             .row_count = result->row_count(),
             .exec_ms = static_cast<int>(ms),
-            .db = "postgres",  // TODO: get from context
+            .db = conn->get().dbname(),
         });
         view.columns(cols);
 

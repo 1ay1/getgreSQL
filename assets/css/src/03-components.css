@@ -7,40 +7,7 @@
     margin-bottom: var(--sp-5);
 }
 
-.stat-card {
-    background: var(--bg-1);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-lg);
-    padding: var(--sp-4);
-    transition: border-color var(--transition-normal), transform var(--transition-normal), box-shadow var(--transition-normal);
-    box-shadow: var(--shadow-sm);
-}
-.stat-card:hover {
-    border-color: var(--border);
-    transform: translateY(-1px);
-    box-shadow: var(--shadow-md);
-}
-
-.stat-value {
-    font-size: 1.3rem;
-    font-weight: 700;
-    color: var(--text-0);
-    font-family: var(--font-mono);
-    line-height: 1.2;
-}
-
-.stat-label {
-    font-size: var(--font-size-xs);
-    color: var(--text-3);
-    margin-top: var(--sp-1);
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
-}
-
-.stat-warning .stat-value { color: var(--warning); }
-.stat-danger .stat-value { color: var(--danger); }
-.stat-accent .stat-value { color: var(--accent); font-size: var(--font-size-md); }
-.stat-success .stat-value { color: var(--success); }
+/* StatCard: co-located in src/ssr/components/stat_card.hpp */
 
 /* ─── Data Grid (Tables) ─────────────────────────────────────────────── */
 
@@ -160,22 +127,7 @@ td.row-num, th.row-num-header {
 
 /* ─── Badges ──────────────────────────────────────────────────────────── */
 
-.badge {
-    display: inline-flex;
-    align-items: center;
-    padding: 1px 6px;
-    border-radius: 3px;
-    font-size: var(--font-size-xs);
-    font-weight: 600;
-    letter-spacing: 0.02em;
-    line-height: 1.6;
-}
-.badge-default { background: var(--bg-4); color: var(--text-1); }
-.badge-primary { background: var(--accent-subtle); color: var(--accent); border: 1px solid rgba(56, 139, 253, 0.2); }
-.badge-secondary { background: none; color: var(--text-2); font-weight: 400; padding: 0; }
-.badge-warning { background: var(--warning-subtle); color: var(--warning); border: 1px solid rgba(210, 153, 34, 0.2); }
-.badge-danger { background: var(--danger-subtle); color: var(--danger); border: 1px solid rgba(248, 81, 73, 0.2); }
-.badge-success { background: var(--success-subtle); color: var(--success); border: 1px solid rgba(63, 185, 80, 0.2); }
+/* Badge: co-located in src/ssr/components/badge.hpp */
 
 /* ─── Buttons ─────────────────────────────────────────────────────────── */
 

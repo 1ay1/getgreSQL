@@ -101,6 +101,10 @@ auto TreeSchemaChildrenHandler::handle(Request& req, AppContext& /*ctx*/) -> Res
     auto idx_url = std::format("/db/{}/schema/{}/indexes", db_name, schema_name);
     ssr::TreeNode::leaf(h, "idx", "Index Analysis", idx_url, 3);
 
+    // Leaf: ERD (Entity Relationship Diagram)
+    auto erd_url = std::format("/db/{}/schema/{}/erd/page", db_name, schema_name);
+    ssr::TreeNode::leaf(h, "view", "ERD Diagram", erd_url, 3);
+
     return Response::html(std::move(h).finish());
 }
 

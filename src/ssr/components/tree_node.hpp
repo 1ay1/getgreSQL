@@ -5,21 +5,21 @@
 
 namespace getgresql::ssr {
 
-    // Map icon class to a distinct character
+    // Map icon class to a distinct character — chosen for clarity and cross-platform rendering
     inline auto icon_char(std::string_view cls) -> const char* {
-        if (cls == "db")       return "&#9707;";  // database cylinder
-        if (cls == "schema")   return "&#9633;";  // square
-        if (cls == "table")    return "&#9638;";  // filled square
-        if (cls == "view")     return "&#9671;";  // diamond
-        if (cls == "func")     return "&#402;";   // f (function)
-        if (cls == "seq")      return "#";         // sequence
-        if (cls == "idx")      return "&#9650;";  // triangle
-        if (cls == "folder")   return "&#9662;";  // down triangle (folder)
-        if (cls == "role")     return "&#9775;";  // person
-        if (cls == "ext")      return "&#10070;"; // extension
-        if (cls == "settings") return "&#9881;";  // gear
-        if (cls == "monitor")  return "&#9673;";  // circle
-        return "&#8226;";  // bullet fallback
+        if (cls == "db")       return "&#9673;";  // ◉ filled circle
+        if (cls == "schema")   return "&#9671;";  // ◇ diamond
+        if (cls == "table")    return "&#9776;";  // ☰ three lines (table rows)
+        if (cls == "view")     return "&#9672;";  // ◈ diamond with dot
+        if (cls == "func")     return "&#402;";   // ƒ function
+        if (cls == "seq")      return "#";         // # sequence
+        if (cls == "idx")      return "&#9889;";  // ⚡ lightning (fast lookup)
+        if (cls == "folder")   return "&#9656;";  // ▸ right arrow
+        if (cls == "role")     return "&#9823;";  // ♟ person/pawn
+        if (cls == "ext")      return "&#10070;"; // ✦ star
+        if (cls == "settings") return "&#9881;";  // ⚙ gear
+        if (cls == "monitor")  return "&#9678;";  // ◎ target/bullseye
+        return "&#8226;";  // • bullet fallback
     }
 
 struct TreeNode {
@@ -31,7 +31,8 @@ struct TreeNode {
         h.raw("<span class=\"tree-icon ").raw(icon_class).raw("\">").raw(icon_char(icon_class)).raw("</span>");
         h.raw("<span class=\"tree-text\">").text(label).raw("</span>");
         if (!badge_text.empty()) h.raw("<span class=\"tree-badge\">").text(badge_text).raw("</span>");
-        h.raw("</div><ul class=\"tree-children\" hx-get=\"").raw(children_url)
+        h.raw("</div><ul class=\"tree-children\" style=\"--guide-depth:")
+         .raw(std::to_string(depth)).raw("\" hx-get=\"").raw(children_url)
          .raw("\" hx-trigger=\"click from:closest .tree-item > .tree-row once\" hx-swap=\"innerHTML\"></ul></li>\n");
     }
 

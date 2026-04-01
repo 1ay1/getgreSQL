@@ -216,6 +216,20 @@ concept ContainerComponent = requires {
     { T::render(p, h, fn) } -> std::same_as<void>;
 };
 
+// ── Co-located assets: components can declare their own CSS/JS ────
+// Components opt in by adding static constexpr css() / js() methods.
+// The registry collects these at startup into component bundles.
+
+template<typename T>
+concept HasCss = requires {
+    { T::css() } -> std::convertible_to<std::string_view>;
+};
+
+template<typename T>
+concept HasJs = requires {
+    { T::js() } -> std::convertible_to<std::string_view>;
+};
+
 // ── Component composition helpers ────────────────────────────────────
 
 // Render a component inline

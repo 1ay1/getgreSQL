@@ -189,6 +189,7 @@ struct DvLineagePanel {
     struct Props {
         std::string_view col;
         std::string_view val;
+        std::string db;             // current database name for links
         bool has_source = false;
         SourceInfo source;
         std::vector<ForeignKey> fks;
@@ -214,7 +215,7 @@ struct DvLineagePanel {
         } else {
             auto& s = p.source;
             // Source table
-            auto table_link = std::string("<a href=\"/db/postgres/schema/") + s.schema +
+            auto table_link = std::string("<a href=\"/db/" + p.db + "/schema/") + s.schema +
                 "/table/" + s.table + "\" data-spa><code>" + s.schema + "." + s.table + "</code></a>";
             if (!s.table_comment.empty()) table_link += " <span class=\"dv-lineage-comment\">" + s.table_comment + "</span>";
             section(h, "Source Table", table_link);
@@ -253,7 +254,7 @@ struct DvLineagePanel {
                         if (dot != std::string::npos) {
                             auto ref_schema = clean.substr(0, dot);
                             auto ref_name = clean.substr(dot + 1);
-                            fk_html += before + "<a href=\"/db/postgres/schema/" + ref_schema +
+                            fk_html += before + "<a href=\"/db/" + p.db + "/schema/" + ref_schema +
                                 "/table/" + ref_name + "\" data-spa>" + ref_table + "</a>";
                             if (paren != std::string::npos) fk_html += rest.substr(paren);
                         } else {
@@ -275,7 +276,7 @@ struct DvLineagePanel {
                     if (dot != std::string::npos) {
                         auto ref_schema = rfk.source_table.substr(0, dot);
                         auto ref_name = rfk.source_table.substr(dot + 1);
-                        rfk_html += "<div><a href=\"/db/postgres/schema/" + ref_schema +
+                        rfk_html += "<div><a href=\"/db/" + p.db + "/schema/" + ref_schema +
                             "/table/" + ref_name + "\" data-spa><code>" + rfk.source_table +
                             "</code></a> via <code>" + rfk.name + "</code></div>";
                     } else {

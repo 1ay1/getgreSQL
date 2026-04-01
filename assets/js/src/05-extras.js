@@ -70,26 +70,6 @@
                         }
                     });
                 }
-                // Explain This — show cell lineage
-                var tableOid = targetSpan.getAttribute('data-table-oid');
-                if (tableOid) {
-                    items.push({
-                        label: 'Explain This',
-                        icon: '&#128269;',
-                        action: function() {
-                            var url = '/dv/explain-cell?table_oid=' + encodeURIComponent(tableOid) +
-                                '&col=' + encodeURIComponent(colName) + '&val=' + encodeURIComponent(text);
-                            fetch(url, {headers: {'HX-Request': 'true'}})
-                                .then(function(r) { return r.text(); })
-                                .then(function(html) {
-                                    var panel = document.createElement('div');
-                                    panel.style.cssText = 'position:fixed;z-index:10001;top:50%;left:50%;transform:translate(-50%,-50%)';
-                                    panel.innerHTML = html;
-                                    document.body.appendChild(panel);
-                                });
-                        }
-                    });
-                }
                 items.push({sep: true});
             }
 
@@ -121,6 +101,21 @@
                 var displayVal = text.length > 25 ? text.substring(0, 25) + '...' : text;
                 items.push({label: 'Filter: ' + colLabel + ' = "' + displayVal + '"', icon: '&#128269;', action: function() { filterByValue(table, colIdx, text); }});
                 items.push({label: 'Exclude this value', icon: '&#10005;', action: function() { excludeValue(table, colIdx, text); }});
+                items.push({sep: true});
+            }
+
+            // ── Explain This — cell lineage & metadata ────────────────
+            var explainSpan = cell.querySelector('[data-table-oid], [data-col]') || span;
+            if (explainSpan) {
+                items.push({
+                    label: 'Explain This',
+                    icon: '&#128269;',
+                    kbd: 'Ctrl+I',
+                    cls: 'ctx-explain',
+                    action: function() {
+                        if (typeof explainCell === 'function') explainCell(explainSpan);
+                    }
+                });
                 items.push({sep: true});
             }
 
@@ -239,6 +234,23 @@
 
     // ─── Sort column ─────────────────────────────────────────────────
     function sortColumn(table, colIdx, dir) {
+        var dv = table.closest('.data-view');
+        var grid = dv ? dv._grid : null;
+        if (grid) {
+            var ci = colIdx - (grid.hasRowNum ? 1 : 0);
+            grid.sortCol = ci;
+            grid.sortDir = dir;
+            for (var i = 0; i < grid.cols.length; i++) {
+                grid.cols[i].el.classList.remove('sort-asc', 'sort-desc');
+                grid.cols[i].el.removeAttribute('data-sort-dir');
+            }
+            if (ci >= 0 && ci < grid.cols.length) {
+                grid.cols[ci].el.classList.add('sort-' + dir);
+                grid.cols[ci].el.setAttribute('data-sort-dir', dir);
+            }
+            grid._afterViewChange();
+            return;
+        }
         var tbody = table.querySelector('tbody');
         var rows = Array.from(tbody.querySelectorAll('tr'));
         rows.sort(function(a, b) {

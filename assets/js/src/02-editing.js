@@ -1,259 +1,65 @@
-// ─── Unified Cell Selection & Editing ────────────────────────────────────
+// ─── Cell Editing & Explain — global functions ──────────────────────────
 //
-// Works on BOTH .editable-cell (table browse, direct save) and
-// .dv-cell (query results, generates UPDATE for review).
+// These are called by the DataGrid engine (06-dataview.js) and the
+// context menu (05-extras.js). Selection and keyboard navigation
+// are handled by the grid engine; this file only provides:
 //
-// Interactions:
-//   Click         → select cell
-//   Right-click   → "Explain This" lineage popover
-//   Double-click  → start editing
-//   F2 / Enter    → start editing
-//   Type a key    → start editing with that character
-//   Tab           → commit + move right (Shift+Tab = left)
-//   Enter         → commit + move down
-//   Escape        → cancel edit
-//   Arrow keys    → navigate cells
-//   Delete        → set to NULL (editable only)
+//   startEdit(span, initialChar)  — inline editing
+//   saveCellValue(...)            — POST to server
+//   moveTo(span, direction)       — move cursor after edit commit
+//   openCellModal(span)           — modal for long values
+//   explainCell(cell)             — "Explain This" lineage panel
+//   getColNameFor(span)           — utility
+//   showEditToast(span, msg)      — utility
 
-(function() {
-    var selectedCell = null;
-    var CELL_SEL = '.editable-cell, .dv-cell';
+// ─── Explain This — fetch and show lineage panel ────────────────────────
 
-    // ── Click to select ──────────────────────────────────────────────
-    document.addEventListener('click', function(e) {
-        var cell = e.target.closest(CELL_SEL);
-        if (cell) {
-            selectCell(cell);
-            return;
-        }
-        if (selectedCell && !e.target.closest('.cell-edit-input')) {
-            deselectCell();
-        }
+function explainCell(cell) {
+    if (!cell) return;
+    var old = document.querySelector('.dv-lineage-popover');
+    if (old) old.remove();
+
+    var tableOid = cell.getAttribute('data-table-oid') || '0';
+    var col = cell.getAttribute('data-col') || getColNameFor(cell);
+    var val = cell.getAttribute('data-full') || cell.textContent;
+    var tr = cell.closest('tr');
+    var ctid = tr ? (tr.getAttribute('data-ctid') || '') : '';
+
+    var url = '/dv/explain-cell?table_oid=' + encodeURIComponent(tableOid) +
+              '&col=' + encodeURIComponent(col) +
+              '&val=' + encodeURIComponent(val) +
+              '&ctid=' + encodeURIComponent(ctid);
+
+    var panel = document.createElement('div');
+    panel.className = 'dv-lineage-popover';
+    panel.innerHTML = '<div class="dv-lineage-panel"><div class="dv-lineage-header">Loading&hellip;</div></div>';
+    panel.style.cssText = 'position:fixed;z-index:10001;top:50%;left:50%;transform:translate(-50%,-50%)';
+    document.body.appendChild(panel);
+
+    fetch(url).then(function(r) { return r.text(); }).then(function(html) {
+        panel.innerHTML = html;
+    }).catch(function() {
+        panel.innerHTML = '<div class="dv-lineage-panel"><div class="dv-lineage-header">Failed to load</div></div>';
     });
 
-    // ── Right-click → Explain This ───────────────────────────────────
-    document.addEventListener('contextmenu', function(e) {
-        var cell = e.target.closest(CELL_SEL);
-        if (!cell) return;
-
-        e.preventDefault();
-        selectCell(cell);
-
-        // Remove any existing lineage panel
-        var old = document.querySelector('.dv-lineage-popover');
-        if (old) old.remove();
-
-        // Gather cell metadata
-        var tableOid = cell.getAttribute('data-table-oid') || '0';
-        var col = cell.getAttribute('data-col') || getColNameFor(cell);
-        var val = cell.getAttribute('data-full') || cell.textContent;
-        var tr = cell.closest('tr');
-        var ctid = tr ? (tr.getAttribute('data-ctid') || '') : '';
-
-        // Fetch lineage panel from server
-        var url = '/dv/explain-cell?table_oid=' + encodeURIComponent(tableOid) +
-                  '&col=' + encodeURIComponent(col) +
-                  '&val=' + encodeURIComponent(val) +
-                  '&ctid=' + encodeURIComponent(ctid);
-
-        var popover = document.createElement('div');
-        popover.className = 'dv-lineage-popover';
-        popover.innerHTML = '<div class="dv-lineage-panel"><div class="dv-lineage-header">Loading&hellip;</div></div>';
-
-        // Position near the click
-        popover.style.position = 'fixed';
-        popover.style.zIndex = '10000';
-        positionPopover(popover, e.clientX, e.clientY);
-        document.body.appendChild(popover);
-
-        fetch(url).then(function(r) { return r.text(); }).then(function(html) {
-            popover.innerHTML = html;
-            positionPopover(popover, e.clientX, e.clientY);
-        }).catch(function() {
-            popover.innerHTML = '<div class="dv-lineage-panel"><div class="dv-lineage-header">Failed to load</div></div>';
-        });
-
-        // Close on click outside or Escape
-        function closePopover(ev) {
-            if (ev.type === 'keydown' && ev.key !== 'Escape') return;
-            if (ev.type === 'mousedown' && popover.contains(ev.target)) return;
-            popover.remove();
-            document.removeEventListener('mousedown', closePopover);
-            document.removeEventListener('keydown', closePopover);
-        }
-        // Delay so this click doesn't immediately close it
-        setTimeout(function() {
-            document.addEventListener('mousedown', closePopover);
-            document.addEventListener('keydown', closePopover);
-        }, 50);
-    });
-
-    function positionPopover(el, x, y) {
-        var pad = 8;
-        el.style.left = x + 'px';
-        el.style.top = y + 'px';
-        // Adjust if overflowing viewport
-        requestAnimationFrame(function() {
-            var rect = el.getBoundingClientRect();
-            if (rect.right > window.innerWidth - pad) {
-                el.style.left = Math.max(pad, x - rect.width) + 'px';
-            }
-            if (rect.bottom > window.innerHeight - pad) {
-                el.style.top = Math.max(pad, y - rect.height) + 'px';
-            }
-        });
+    function closePanel(ev) {
+        if (ev.type === 'keydown' && ev.key !== 'Escape') return;
+        if (ev.type === 'mousedown' && panel.contains(ev.target)) return;
+        panel.remove();
+        document.removeEventListener('mousedown', closePanel);
+        document.removeEventListener('keydown', closePanel);
     }
-
-    // ── Double-click to edit ─────────────────────────────────────────
-    // Skip cells with hx-get — those are handled by htmx SSR editing
-    document.addEventListener('dblclick', function(e) {
-        var cell = e.target.closest(CELL_SEL);
-        if (cell && !cell.hasAttribute('hx-get')) startEdit(cell);
-    });
-
-    // ── Keyboard ─────────────────────────────────────────────────────
-    document.addEventListener('keydown', function(e) {
-        if (!selectedCell || selectedCell.querySelector('.cell-edit-input')) return;
-        // Don't intercept if focus is in an input/textarea elsewhere
-        var active = document.activeElement;
-        if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA') && !active.classList.contains('cell-edit-input')) return;
-
-        var td = selectedCell.closest('td');
-        if (!td) return;
-        var tr = td.closest('tr');
-        if (!tr) return;
-
-        if (e.key === 'Enter' || e.key === 'F2') {
-            e.preventDefault();
-            // htmx-managed cells: trigger htmx click to load edit form
-            if (selectedCell.hasAttribute('hx-get')) {
-                htmx.trigger(selectedCell, 'dblclick');
-            } else {
-                startEdit(selectedCell);
-            }
-        } else if (e.key === 'Tab') {
-            e.preventDefault();
-            var next = e.shiftKey ? getPrev(td, tr) : getNext(td, tr);
-            if (next) selectCell(next);
-        } else if (e.key === 'ArrowRight') {
-            var n = getNext(td, tr);
-            if (n) { e.preventDefault(); selectCell(n); }
-        } else if (e.key === 'ArrowLeft') {
-            var p = getPrev(td, tr);
-            if (p) { e.preventDefault(); selectCell(p); }
-        } else if (e.key === 'ArrowDown') {
-            var b = getBelow(td, tr);
-            if (b) { e.preventDefault(); selectCell(b); }
-        } else if (e.key === 'ArrowUp') {
-            var a = getAbove(td, tr);
-            if (a) { e.preventDefault(); selectCell(a); }
-        } else if (e.key === 'Delete' || e.key === 'Backspace') {
-            if (isDirectEditable(selectedCell)) {
-                e.preventDefault();
-                setToNull(selectedCell);
-            }
-        } else if (e.key === 'Escape') {
-            deselectCell();
-        } else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey) {
-            e.preventDefault();
-            if (selectedCell.hasAttribute('hx-get')) {
-                htmx.trigger(selectedCell, 'dblclick');
-            } else {
-                startEdit(selectedCell, e.key);
-            }
-        }
-    });
-
-    // ── Selection helpers ────────────────────────────────────────────
-
-    function selectCell(cell) {
-        if (selectedCell) selectedCell.classList.remove('cell-selected');
-        selectedCell = cell;
-        cell.classList.add('cell-selected');
-        document.querySelectorAll('tr.row-active').forEach(function(r) { r.classList.remove('row-active'); });
-        var tr = cell.closest('tr');
-        if (tr) tr.classList.add('row-active');
-    }
-
-    function deselectCell() {
-        if (selectedCell) {
-            selectedCell.classList.remove('cell-selected');
-            selectedCell = null;
-        }
-        document.querySelectorAll('tr.row-active').forEach(function(r) { r.classList.remove('row-active'); });
-    }
-
-    // ── Navigation ──────────────────────────────────────────────────
-
-    function getNext(td, tr) {
-        var n = td.nextElementSibling;
-        while (n) { var c = n.querySelector(CELL_SEL); if (c) return c; n = n.nextElementSibling; }
-        var nr = tr.nextElementSibling;
-        if (nr) { var c = nr.querySelector(CELL_SEL); if (c) return c; }
-        return null;
-    }
-    function getPrev(td, tr) {
-        var p = td.previousElementSibling;
-        while (p) { var c = p.querySelector(CELL_SEL); if (c) return c; p = p.previousElementSibling; }
-        var pr = tr.previousElementSibling;
-        if (pr) { var all = pr.querySelectorAll(CELL_SEL); if (all.length) return all[all.length - 1]; }
-        return null;
-    }
-    function getBelow(td, tr) {
-        var idx = Array.from(tr.children).indexOf(td);
-        var nr = tr.nextElementSibling;
-        return nr && nr.children[idx] ? nr.children[idx].querySelector(CELL_SEL) : null;
-    }
-    function getAbove(td, tr) {
-        var idx = Array.from(tr.children).indexOf(td);
-        var pr = tr.previousElementSibling;
-        return pr && pr.children[idx] ? pr.children[idx].querySelector(CELL_SEL) : null;
-    }
-
-    // ── Is this cell directly editable (has table context)? ─────────
-
-    function isDirectEditable(span) {
-        return span.classList.contains('editable-cell') && span.getAttribute('data-ctid');
-    }
-
-    // ── Get column name for a cell ──────────────────────────────────
-
-    function getColName(span) {
-        if (span.getAttribute('data-col')) return span.getAttribute('data-col');
-        var td = span.closest('td');
-        var tr = td ? td.closest('tr') : null;
-        if (!td || !tr) return '';
-        var idx = Array.from(tr.children).indexOf(td);
-        var table = tr.closest('table');
-        if (!table || !table.tHead) return '';
-        var th = table.tHead.rows[0].children[idx];
-        if (!th) return '';
-        var text = th.querySelector('.dv-th-text');
-        return text ? text.textContent.trim() : th.textContent.trim();
-    }
-
-    // ── Set to NULL (editable cells only) ───────────────────────────
-
-    function setToNull(span) {
-        if (!isDirectEditable(span)) return;
-        var dv = span.closest('.data-view');
-        var db = dv ? dv.getAttribute('data-db') : '';
-        var schema = dv ? dv.getAttribute('data-schema') : '';
-        var table = dv ? dv.getAttribute('data-table') : '';
-        var col = span.getAttribute('data-col');
-        var ctid = span.getAttribute('data-ctid');
-        var oldValue = span.textContent;
-
-        span.textContent = 'NULL';
-        span.classList.add('null-value', 'cell-saving');
-        saveCellValue(db, schema, table, col, ctid, '', span, oldValue);
-    }
-})();
+    setTimeout(function() {
+        document.addEventListener('mousedown', closePanel);
+        document.addEventListener('keydown', closePanel);
+    }, 50);
+}
 
 // ─── Start Editing — works for both editable and read-only cells ─────
 
 function startEdit(span, initialChar) {
     if (span.querySelector('.cell-edit-input') || span.querySelector('textarea')) return;
+    window._dvEditing = true;
 
     // Long values → modal
     if ((span.classList.contains('dv-cell-long') || span.classList.contains('cell-long')) &&
@@ -263,7 +69,7 @@ function startEdit(span, initialChar) {
     }
 
     var currentValue = span.getAttribute('data-full') || span.textContent;
-    var directEdit = span.classList.contains('editable-cell') && span.getAttribute('data-ctid');
+    var directEdit = span.classList.contains('editable-cell') && (span.getAttribute('data-ctid') || span.closest('tr[data-ctid]'));
 
     span.classList.add('cell-editing');
     var input = document.createElement('input');
@@ -281,6 +87,7 @@ function startEdit(span, initialChar) {
     function commit(moveDirection) {
         if (committed) return;
         committed = true;
+        window._dvEditing = false;
         var newValue = input.value;
         span.classList.remove('cell-editing');
 
@@ -290,20 +97,27 @@ function startEdit(span, initialChar) {
             return;
         }
 
+        // Update grid data store
+        var dv = span.closest('.data-view');
+        var grid = dv ? dv._grid : null;
+
         if (directEdit) {
-            // ── Editable mode: save directly to DB ──────────────
-            var dv = span.closest('.data-view');
             var db = dv ? dv.getAttribute('data-db') : '';
             var schema = dv ? dv.getAttribute('data-schema') : '';
             var table = dv ? dv.getAttribute('data-table') : '';
             var col = span.getAttribute('data-col');
-            var ctid = span.getAttribute('data-ctid');
+            var tr = span.closest('tr');
+            var ctid = span.getAttribute('data-ctid') || (tr ? tr.getAttribute('data-ctid') : '');
 
             span.textContent = newValue;
             span.classList.add('cell-saving');
             saveCellValue(db, schema, table, col, ctid, newValue, span, currentValue);
+
+            if (grid) {
+                var coords = grid._findCoords(span);
+                if (coords) grid.updateCellValue(coords.di, coords.c, newValue, false);
+            }
         } else {
-            // ── Read-only mode: generate UPDATE and copy to clipboard ──
             span.textContent = newValue;
             var colName = getColNameFor(span);
             var oldEsc = currentValue.replace(/'/g, "''");
@@ -312,7 +126,6 @@ function startEdit(span, initialChar) {
                       "' WHERE \"" + colName + "\" = '" + oldEsc + "'; -- review and run";
             navigator.clipboard.writeText(sql);
             showEditToast(span, 'UPDATE copied to clipboard');
-            // Revert the visual — this was just for generating SQL
             setTimeout(function() { span.textContent = currentValue; }, 2000);
         }
         if (moveDirection) moveTo(span, moveDirection);
@@ -322,7 +135,12 @@ function startEdit(span, initialChar) {
     input.addEventListener('keydown', function(e) {
         if (e.key === 'Enter') { e.preventDefault(); commit('down'); }
         else if (e.key === 'Tab') { e.preventDefault(); commit(e.shiftKey ? 'left' : 'right'); }
-        else if (e.key === 'Escape') { committed = true; span.classList.remove('cell-editing'); span.textContent = currentValue; }
+        else if (e.key === 'Escape') {
+            committed = true;
+            window._dvEditing = false;
+            span.classList.remove('cell-editing');
+            span.textContent = currentValue;
+        }
     });
 }
 
@@ -374,6 +192,14 @@ function saveCellValue(db, schema, table, col, ctid, newValue, span, oldValue) {
 }
 
 function moveTo(fromSpan, dir) {
+    // Use grid engine if available
+    var dv = fromSpan.closest('.data-view');
+    var grid = dv ? dv._grid : null;
+    if (grid) {
+        grid.moveFromSpan(fromSpan, dir);
+        return;
+    }
+    // Fallback for non-grid views
     var SEL = '.editable-cell, .dv-cell';
     var td = fromSpan.closest('td');
     var tr = td ? td.closest('tr') : null;
@@ -400,8 +226,9 @@ function moveTo(fromSpan, dir) {
 // ─── Cell Modal (for long values like JSON, text) ────────────────────────
 
 function openCellModal(span) {
+    window._dvEditing = true;
     var col = span.getAttribute('data-col') || getColNameFor(span);
-    var ctid = span.getAttribute('data-ctid');
+    var ctid = span.getAttribute('data-ctid') || (span.closest('tr') ? span.closest('tr').getAttribute('data-ctid') : '');
     var dv = span.closest('.data-view');
     var schema = dv ? dv.getAttribute('data-schema') : '';
     var table = dv ? dv.getAttribute('data-table') : '';
@@ -409,6 +236,13 @@ function openCellModal(span) {
     var directEdit = span.classList.contains('editable-cell') && ctid;
 
     var fullValue = span.getAttribute('data-full') || span.textContent;
+
+    // Try to pretty-print JSON
+    var displayValue = fullValue;
+    try {
+        var parsed = JSON.parse(fullValue);
+        displayValue = JSON.stringify(parsed, null, 2);
+    } catch(e) {}
 
     var overlay = document.createElement('div');
     overlay.className = 'command-overlay';
@@ -419,7 +253,7 @@ function openCellModal(span) {
         '<span class="cell-modal-title">' + (col || 'Cell') + '</span>' +
         '<span class="cell-modal-chars">' + fullValue.length + ' chars</span>' +
         '<button class="cell-modal-close">&times;</button></div>' +
-        '<textarea class="cell-modal-textarea">' + fullValue.replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</textarea>' +
+        '<textarea class="cell-modal-textarea">' + displayValue.replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</textarea>' +
         '<div class="cell-modal-footer">' +
         (directEdit ? '<button class="btn btn-sm btn-primary cell-modal-save">Save</button>' :
                        '<button class="btn btn-sm btn-primary cell-modal-save">Copy UPDATE</button>') +
@@ -437,12 +271,16 @@ function openCellModal(span) {
         charCount.textContent = textarea.value.length + ' chars';
     });
 
+    function closeModal() { overlay.remove(); window._dvEditing = false; }
+
     modal.querySelector('.cell-modal-save').addEventListener('click', function() {
         var newValue = textarea.value;
-        if (newValue === fullValue) { overlay.remove(); return; }
+        if (newValue === fullValue) { closeModal(); return; }
+
+        // Update grid data store
+        var grid = dv ? dv._grid : null;
 
         if (directEdit) {
-            // Direct save
             if (newValue.length <= 80) {
                 span.textContent = newValue;
                 span.classList.remove('dv-cell-long', 'cell-long');
@@ -453,8 +291,11 @@ function openCellModal(span) {
             }
             span.classList.add('cell-saving');
             saveCellValue(db, schema, table, col, ctid, newValue, span, fullValue);
+            if (grid) {
+                var coords = grid._findCoords(span);
+                if (coords) grid.updateCellValue(coords.di, coords.c, newValue, false);
+            }
         } else {
-            // Generate UPDATE
             var colName = col || 'column';
             var oldEsc = fullValue.replace(/'/g, "''");
             var newEsc = newValue.replace(/'/g, "''");
@@ -463,14 +304,14 @@ function openCellModal(span) {
             navigator.clipboard.writeText(sql);
             showEditToast(span, 'UPDATE copied to clipboard');
         }
-        overlay.remove();
+        closeModal();
     });
 
-    modal.querySelector('.cell-modal-cancel').addEventListener('click', function() { overlay.remove(); });
-    modal.querySelector('.cell-modal-close').addEventListener('click', function() { overlay.remove(); });
-    overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
+    modal.querySelector('.cell-modal-cancel').addEventListener('click', closeModal);
+    modal.querySelector('.cell-modal-close').addEventListener('click', closeModal);
+    overlay.addEventListener('click', function(e) { if (e.target === overlay) closeModal(); });
     overlay.addEventListener('keydown', function(e) {
-        if (e.key === 'Escape') overlay.remove();
+        if (e.key === 'Escape') closeModal();
         if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') modal.querySelector('.cell-modal-save').click();
     });
 }

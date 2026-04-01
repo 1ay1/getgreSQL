@@ -132,6 +132,14 @@ public:
         return PgConnection<Connected>{conn_.release()};
     }
 
+    // ── Connection metadata ──────────────────────────────────────────
+    auto dbname() const -> std::string_view
+        requires Queryable<State>
+    {
+        const char* db = PQdb(conn_.get());
+        return db ? std::string_view(db) : std::string_view("postgres");
+    }
+
     // ── Query execution (only in Queryable states) ──────────────────
     auto exec(std::string_view sql) const
         -> Result<PgResult>

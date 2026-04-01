@@ -141,7 +141,7 @@ auto DvExplainCellHandler::handle(Request& req, AppContext& ctx) -> Response {
     auto conn = ctx.pool.checkout();
     if (!conn) return Response::html(render_to_string<Alert>({"Connection failed", "error"}));
 
-    DvLineagePanel::Props props{.col = col, .val = val};
+    DvLineagePanel::Props props{.col = col, .val = val, .db = std::string(conn->get().dbname())};
 
     if (table_oid.empty() || table_oid == "0") {
         // Computed column

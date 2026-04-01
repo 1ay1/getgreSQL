@@ -447,28 +447,61 @@ tr.dv-row-selected td {
 }
 
 
+/* ─── Explain This Button (appears on cell select) ───────────────────── */
+
+.cell-explain-btn {
+    position: fixed;
+    z-index: 100;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border: 1px solid var(--accent-dim);
+    border-radius: 50%;
+    background: var(--accent-dim);
+    color: #fff;
+    font-size: 0.6rem;
+    font-weight: 700;
+    font-style: italic;
+    font-family: Georgia, serif;
+    line-height: 18px;
+    text-align: center;
+    cursor: pointer;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+    transition: transform 0.1s, box-shadow 0.1s, background 0.1s;
+    opacity: 0.85;
+}
+.cell-explain-btn:hover {
+    background: var(--accent);
+    border-color: var(--accent);
+    box-shadow: 0 2px 8px rgba(56,139,253,0.4);
+    transform: scale(1.15);
+    opacity: 1;
+}
+
 /* ─── Cell Lineage Panel (Explain This) ──────────────────────────────── */
 
 .dv-lineage-panel {
     background: var(--bg-1);
-    border: 1px solid var(--border);
+    border: 1px solid var(--accent-dim);
     border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-md);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5), 0 0 0 1px rgba(56,139,253,0.15);
     padding: 0;
-    max-width: 420px;
+    min-width: 340px;
+    max-width: 480px;
     font-size: var(--font-size-xs);
-    animation: acPopIn 0.12s ease-out;
+    animation: acPopIn 0.15s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .dv-lineage-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: var(--sp-2) var(--sp-3);
+    padding: var(--sp-3) var(--sp-4);
     border-bottom: 1px solid var(--border-subtle);
+    background: linear-gradient(135deg, rgba(56,139,253,0.08) 0%, transparent 100%);
     font-weight: 700;
     font-size: var(--font-size-sm);
-    color: var(--text-0);
+    color: var(--accent);
 }
 .dv-lineage-close {
     background: none;
@@ -481,18 +514,22 @@ tr.dv-row-selected td {
 .dv-lineage-close:hover { color: var(--text-0); }
 
 .dv-lineage-section {
-    padding: var(--sp-2) var(--sp-3);
+    padding: var(--sp-3) var(--sp-4);
     border-bottom: 1px solid var(--border-subtle);
 }
 .dv-lineage-section:last-child { border-bottom: none; }
+.dv-lineage-section:hover {
+    background: rgba(56,139,253,0.03);
+}
 
 .dv-lineage-label {
     font-size: 0.6rem;
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--text-4);
-    margin-bottom: 2px;
+    letter-spacing: 0.06em;
+    color: var(--accent);
+    opacity: 0.7;
+    margin-bottom: 3px;
 }
 
 .dv-lineage-value {
@@ -736,4 +773,96 @@ tr.dv-row-selected td {
 /* Inline edit form inside cell */
 .dv-edit-form {
     display: contents;
+}
+
+/* ─── Virtual Scroll ──────────────────────────────────────────────────── */
+
+.dv-spacer td {
+    padding: 0 !important;
+    border: none !important;
+    background: transparent !important;
+    line-height: 0;
+    font-size: 0;
+}
+
+/* ─── Multi-Cell Selection Range ──────────────────────────────────────── */
+
+.cell-range {
+    background: rgba(56, 139, 253, 0.06) !important;
+    box-shadow: inset 0 0 0 1px rgba(56, 139, 253, 0.25);
+}
+
+/* ─── Numeric Cells — right aligned ───────────────────────────────────── */
+
+td.dv-num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+/* ─── JSON Type Indicator ─────────────────────────────────────────────── */
+
+.dv-type-json {
+    color: var(--warning);
+    cursor: pointer;
+}
+.dv-type-json:hover {
+    text-decoration: underline dotted;
+}
+
+/* ─── Custom Scrollbar (dark theme) ───────────────────────────────────── */
+
+.table-wrapper.scrollable::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+.table-wrapper.scrollable::-webkit-scrollbar-track {
+    background: var(--bg-0);
+}
+.table-wrapper.scrollable::-webkit-scrollbar-thumb {
+    background: var(--bg-4);
+    border-radius: 4px;
+    border: 1px solid var(--bg-0);
+}
+.table-wrapper.scrollable::-webkit-scrollbar-thumb:hover {
+    background: var(--text-4);
+}
+.table-wrapper.scrollable::-webkit-scrollbar-corner {
+    background: var(--bg-0);
+}
+
+/* Firefox scrollbar */
+.table-wrapper.scrollable {
+    scrollbar-width: thin;
+    scrollbar-color: var(--bg-4) var(--bg-0);
+}
+
+/* ─── Smooth cell transitions ─────────────────────────────────────────── */
+
+.editable-cell,
+.dv-cell {
+    transition: background 0.1s, box-shadow 0.1s;
+}
+
+/* ─── Cell editing state ──────────────────────────────────────────────── */
+
+.cell-editing {
+    padding: 0 !important;
+}
+
+/* ─── Context menu explain highlight ──────────────────────────────────── */
+
+.ctx-explain {
+    color: var(--accent) !important;
+    font-weight: 600;
+}
+.ctx-explain .ctx-icon {
+    color: var(--accent);
+}
+
+/* ─── Diff button active state ────────────────────────────────────────── */
+
+.dv-diff-btn.btn-primary {
+    background: var(--accent-dim);
+    color: #fff;
+    border-color: var(--accent);
 }

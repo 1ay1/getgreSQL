@@ -365,6 +365,8 @@ auto DashboardTopTablesHandler::handle(Request& /*req*/, AppContext& ctx) -> Res
     h.raw("<div class=\"dashboard-section-header\">Largest Tables</div>");
     h.raw("<div class=\"dashboard-section-body\">");
 
+    auto current_db = std::string(conn->get().dbname());
+
     if (!result || result->row_count() == 0) {
         h.raw("<div class=\"dash-empty\">No tables found</div>");
     } else {
@@ -387,13 +389,13 @@ auto DashboardTopTablesHandler::handle(Request& /*req*/, AppContext& ctx) -> Res
             auto pct = max_bytes > 0 ? static_cast<double>(size_bytes) / max_bytes * 100.0 : 0.0;
 
             h.raw("<div class=\"dash-bar-row\">");
-            h.raw("<span class=\"dash-bar-name\"><a href=\"/db/postgres/schema/")
+            h.raw("<span class=\"dash-bar-name\"><a href=\"/db/").text(current_db).raw("/schema/")
              .text(schema).raw("/table/").text(table).raw("\" data-spa>")
              .text(schema).raw(".").text(table).raw("</a></span>");
-            h.raw("<span class=\"dash-bar-track\"><div>");
+            h.raw("<div class=\"dash-bar-track\"><div>");
             h.raw(std::format("<div class=\"dash-bar-fill{}\" style=\"width:{:.1f}%\"></div>",
                 dead_pct > 20 ? " dash-bar-warn" : "", pct));
-            h.raw("</div></span>");
+            h.raw("</div></div>");
             h.raw("<span class=\"dash-bar-value\">").text(size).raw("</span>");
             h.raw("<span class=\"dash-bar-meta\">").raw(live).raw(" rows");
             if (dead_pct > 5) {

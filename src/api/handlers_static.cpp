@@ -1,4 +1,5 @@
 #include "api/routes.hpp"
+#include "ssr/component_registry.hpp"
 
 #include <string>
 
@@ -12,8 +13,22 @@
 
 namespace getgresql::api {
 
+// Lazy-initialized component asset bundles (computed once, cached forever)
+static auto component_css() -> const std::string& {
+    static const auto s = ssr::collect_css();
+    return s;
+}
+static auto component_js() -> const std::string& {
+    static const auto s = ssr::collect_js();
+    return s;
+}
+
 auto StaticHandler::handle(Request& req, AppContext& /*ctx*/) -> Response {
     auto path = std::string("/") + std::string(req.param("path"));
+
+    // Component asset bundles (collected from C++ constexpr strings)
+    if (path == "/css/components.css") return Response::css(component_css());
+    if (path == "/js/components.js") return Response::js(component_js());
 
 #if HAS_EMBEDDED_ASSETS
     auto it = assets::all.find(path);
