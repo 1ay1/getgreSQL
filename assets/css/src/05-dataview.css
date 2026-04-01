@@ -255,9 +255,8 @@
 }
 
 /* DataView table */
-.dv-table { border-collapse: collapse; width: 100%; }
+.dv-table { border-collapse: collapse; width: 100%; table-layout: fixed; }
 .dv-table td {
-    max-width: 250px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -269,8 +268,51 @@
     height: 30px;
     position: relative;
     user-select: none;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 .dv-table td:last-child, .dv-table th:last-child { border-right: none; }
+
+/* Row number column — fixed width, never overlapped */
+.dv-table .row-num-header,
+.dv-table td.row-num {
+    width: 48px;
+    min-width: 48px;
+    max-width: 48px;
+    text-align: center;
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    background: var(--bg-1);
+}
+.dv-table thead .row-num-header {
+    background: var(--bg-2);
+    z-index: 3;
+}
+
+/* Actions column — sticky right, always visible */
+.dv-table .dv-actions-header,
+.dv-table td.dv-actions {
+    width: 48px;
+    min-width: 48px;
+    max-width: 48px;
+    text-align: center;
+    position: sticky;
+    right: 0;
+    z-index: 2;
+    background: var(--bg-1);
+    border-left: 1px solid var(--border-subtle);
+    border-right: none;
+}
+.dv-table thead .dv-actions-header {
+    background: var(--bg-2);
+    z-index: 3;
+}
+/* Hover state preserves background on sticky cells */
+.dv-table tbody tr:hover td.row-num,
+.dv-table tbody tr:hover td.dv-actions {
+    background: var(--bg-2);
+}
 
 /* Sort indicators */
 .dv-table th.sortable { cursor: pointer; }
@@ -317,8 +359,6 @@ tr.dv-row-selected td {
     color: var(--text-3);
     font-family: var(--font-mono);
     font-size: var(--font-size-xs);
-    text-align: center;
-    min-width: 36px;
 }
 .row-num:hover { color: var(--accent); }
 
@@ -347,8 +387,7 @@ tr.dv-row-selected td {
     animation: slideDown 0.2s ease-out;
 }
 
-/* Actions column */
-.dv-actions-header { width: 40px; }
+/* Actions column (width/sticky handled above in dv-table rules) */
 
 /* Toast notification */
 .dv-toast {

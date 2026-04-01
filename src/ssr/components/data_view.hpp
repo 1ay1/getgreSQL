@@ -175,7 +175,7 @@ public:
         }
 
         // Delete button
-        h_.raw("<td><button class=\"btn btn-sm btn-danger\" "
+        h_.raw("<td class=\"dv-actions\"><button class=\"btn btn-sm btn-danger\" "
               "hx-post=\"/db/").raw(db).raw("/schema/").raw(schema).raw("/table/").raw(table)
          .raw("/delete-row\" hx-vals='{\"ctid\":\"").text(ctid)
          .raw("\"}' hx-target=\"#tab-content\" hx-swap=\"innerHTML\" "
