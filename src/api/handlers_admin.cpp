@@ -599,13 +599,13 @@ auto TerminateHandler::handle(Request& req, AppContext& ctx) -> Response {
 
 auto SettingsReloadHandler::handle(Request& /*req*/, AppContext& ctx) -> Response {
     auto conn = ctx.pool.checkout();
-    if (!conn) return Response::html(render_to_string<Alert>({error_message(conn.error()), "error"}));
+    if (!conn) return Response::html(render_to_string<Badge>({error_message(conn.error()), "danger"}));
 
     auto result = conn->get().exec("SELECT pg_reload_conf()");
     if (!result) {
-        return Response::html(render_to_string<Alert>({error_message(result.error()), "error"}));
+        return Response::html(render_to_string<Badge>({error_message(result.error()), "danger"}));
     }
-    return Response::html(render_to_string<Alert>({"Configuration reloaded successfully", "success"}));
+    return Response::html(render_to_string<Badge>({"Config reloaded", "success"}));
 }
 
 // ─── UnusedIndexesHandler ──────────────────────────────────────────
