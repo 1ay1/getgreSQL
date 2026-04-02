@@ -113,7 +113,7 @@ private:
             }
             el<Span>(h, {cls("toolbar-spacer")});
             {
-                auto conn = open<A>(h, {href("/connections"), cls("toolbar-conn"), title("Manage Connections")});
+                auto conn = open<Span>(h, {cls("toolbar-conn")});
                 el<Span>(h, {cls("conn-dot")});
                 el<Span>(h, {cls("conn-label"), id("toolbar-db")}, "Connected");
             }
@@ -167,10 +167,6 @@ private:
             el<Span>(h, {cls("status-sep")});
             el<Span>(h, {cls("status-item"), id("status-info")});
             el<Span>(h, {cls("status-spacer")});
-            {
-                auto item = open<Span>(h, {cls("status-item")});
-                el_raw<A>(h, {href("/connections"), style("color:inherit;text-decoration:none")}, "&#128268; Connections");
-            }
             {
                 auto item = open<Span>(h, {cls("status-item")});
                 el<Kbd>(h, {}, "Ctrl+B");

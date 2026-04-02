@@ -1,7 +1,6 @@
 #pragma once
 
 #include "api/handlers_admin.hpp"
-#include "api/handlers_connections.hpp"
 #include "api/handlers_db.hpp"
 #include "api/handlers_dv.hpp"
 #include "api/handlers_monitor.hpp"
@@ -132,15 +131,7 @@ using AppRoutes = RouteTable<
     Route<POST, "/dv/set-null",                                     DvSetNullHandler>,
     Route<GET,  "/dv/explain-cell",                                 DvExplainCellHandler>,
 
-    // Connections
-    Route<GET,  "/connections",                                     ConnectionsPageHandler>,
-    Route<POST, "/connections/save",                                ConnectionSaveHandler>,
-    Route<POST, "/connections/delete",                              ConnectionDeleteHandler>,
-    Route<POST, "/connections/switch",                              ConnectionSwitchHandler>,
-    Route<POST, "/connections/test",                                ConnectionTestHandler>,
-
     // API (JSON)
-    Route<GET,  "/api/connection-info",                             ConnectionInfoHandler>,
     Route<GET,  "/api/completions",                                 CompletionsHandler>,
 
     // Object explorer tree (htmx partials)
