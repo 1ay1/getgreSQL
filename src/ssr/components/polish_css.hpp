@@ -279,6 +279,23 @@ td.row-num:hover { color: var(--accent); background: var(--accent-subtle); }
     gap: var(--sp-3);
 }
 
+/* ─── Admin page wrapper ─────────────────────────────────────────────── */
+.admin-wrap {
+    max-width: 100%;
+    padding: var(--sp-5) 0;
+}
+.admin-header {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    margin-bottom: var(--sp-4);
+}
+.admin-header h3 { margin: 0; }
+.admin-subtitle {
+    color: var(--text-3);
+    font-size: var(--font-size-xs);
+}
+
 /* ─── Editable cell cursor hint ───────────────────────────────────────── */
 .editable-cell { cursor: cell; }
 .editable-cell:hover::after {

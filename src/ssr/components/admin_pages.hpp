@@ -37,20 +37,16 @@ struct UnusedIndexPage {
     static auto render(const Props& p, Html& h) -> void {
         using namespace html;
         {
-            auto wrap = open<Div>(h, {style("max-width:960px;margin:0 auto;padding:var(--sp-5)")});
+            auto wrap = open<Div>(h, {cls("admin-wrap")});
             {
-                auto header = open<Div>(h, {style("display:flex;align-items:center;gap:var(--sp-3);margin-bottom:var(--sp-4)")});
-                el<H3>(h, {style("margin:0")}, "Unused Indexes");
-                el<Span>(h, {style("color:var(--text-3);font-size:var(--font-size-xs)")},
+                auto header = open<Div>(h, {cls("admin-header")});
+                el<H3>(h, {}, "Unused Indexes");
+                el<Span>(h, {cls("admin-subtitle")},
                     "Indexes with zero scans (excluding primary keys and unique constraints)");
             }
 
             if (p.indexes.empty()) {
-                {
-                    auto empty = open<Div>(h, {cls("empty-state")});
-                    el_raw<Div>(h, {cls("empty-icon")}, "&#9889;");
-                    el<P>(h, {}, "No unused indexes found. Your database is well-optimized.");
-                }
+                ui::empty_state(h, icon::lightning, "No unused indexes found. Your database is well-optimized.");
             } else {
                 long long total_waste = 0;
                 for (auto& idx : p.indexes) total_waste += idx.size_bytes;
@@ -59,7 +55,7 @@ struct UnusedIndexPage {
                     ? std::format("{:.1f} MB", total_waste / 1048576.0)
                     : std::format("{:.1f} KB", total_waste / 1024.0);
                 {
-                    auto info = open<Div>(h, {cls("query-info"), style("margin-bottom:var(--sp-3)")});
+                    auto info = open<Div>(h, {cls("query-info")});
                     el<Span>(h, {cls("rows-badge")}, std::to_string(p.indexes.size()) + " unused indexes");
                     el<Span>(h, {cls("time-badge")}, "Wasting " + waste_str);
                 }
@@ -72,13 +68,16 @@ struct UnusedIndexPage {
                     auto def_short = idx.definition.size() > 60
                         ? idx.definition.substr(0, 60) + "..." : idx.definition;
                     Table::row(h, {
-                        idx.schema, idx.table, idx.index, idx.size,
-                        "<code title=\"" + idx.definition + "\">" + def_short + "</code>",
-                        "<button class=\"btn btn-sm btn-danger\" "
-                        "hx-post=\"/admin/drop-index\" "
-                        "hx-vals='{\"schema\":\"" + idx.schema + "\",\"index\":\"" + idx.index + "\"}' "
-                        "hx-target=\"closest tr\" hx-swap=\"outerHTML\" "
-                        "hx-confirm=\"DROP INDEX " + idx.schema + "." + idx.index + "?\">Drop</button>"
+                        markup::detail::esc(idx.schema),
+                        markup::detail::esc(idx.table),
+                        markup::detail::esc(idx.index),
+                        markup::detail::esc(idx.size),
+                        markup::code(def_short),
+                        markup::btn("Drop").danger()
+                            .hx_post("/admin/drop-index")
+                            .vals("{\"schema\":\"" + idx.schema + "\",\"index\":\"" + idx.index + "\"}")
+                            .target("closest tr").swap("outerHTML")
+                            .confirm("DROP INDEX " + idx.schema + "." + idx.index + "?"),
                     });
                 }
                 Table::end(h);
@@ -111,12 +110,15 @@ struct PermissionAuditPage {
     static auto render(const Props& p, Html& h) -> void {
         using namespace html;
         {
-            auto wrap = open<Div>(h, {style("max-width:960px;margin:0 auto;padding:var(--sp-5)")});
-            el<H3>(h, {}, "Permission Audit");
+            auto wrap = open<Div>(h, {cls("admin-wrap")});
+            {
+                auto header = open<Div>(h, {cls("admin-header")});
+                el<H3>(h, {}, "Permission Audit");
+            }
 
             if (!p.memberships.empty()) {
                 {
-                    auto section = open<Div>(h, {cls("dashboard-section"), style("margin-bottom:var(--sp-4)")});
+                    auto section = open<Div>(h, {cls("dashboard-section")});
                     el<Div>(h, {cls("dashboard-section-header")}, "Role Memberships");
                     {
                         auto body = open<Div>(h, {cls("dashboard-section-body")});
@@ -128,17 +130,14 @@ struct PermissionAuditPage {
             }
 
             if (p.grants.empty()) {
-                {
-                    auto empty = open<Div>(h, {cls("empty-state")});
-                    el<P>(h, {}, "No custom table permissions found");
-                }
+                ui::empty_state(h, "No custom table permissions found");
             } else {
                 {
                     auto section = open<Div>(h, {cls("dashboard-section")});
                     {
                         auto hdr = open<Div>(h, {cls("dashboard-section-header")});
-                        h.raw("Table Permissions");
-                        el<Span>(h, {cls("badge"), style("margin-left:var(--sp-2)")},
+                        h.text("Table Permissions");
+                        el<Span>(h, {cls("badge")},
                             std::to_string(p.grants.size()) + " grants");
                     }
                     {
@@ -149,8 +148,11 @@ struct PermissionAuditPage {
                         });
                         for (auto& g : p.grants) {
                             Table::row(h, {
-                                g.grantee, g.schema, g.table, g.privilege,
-                                g.is_grantable ? "<span class=\"badge success\">YES</span>" : "NO"
+                                markup::detail::esc(g.grantee),
+                                markup::detail::esc(g.schema),
+                                markup::detail::esc(g.table),
+                                markup::detail::esc(g.privilege),
+                                markup::bool_yes_no(g.is_grantable),
                             });
                         }
                         Table::end(h);
@@ -178,7 +180,7 @@ struct ExplainHints {
         using namespace html;
         {
             auto wrap = open<Div>(h, {cls("explain-hints")});
-            el_raw<Div>(h, {cls("explain-hints-header")}, "&#128161; Index Suggestions");
+            el_raw<Div>(h, {cls("explain-hints-header")}, icon::bulb + std::string(" Index Suggestions"));
             for (auto& hint : p.hints) {
                 {
                     auto item = open<Div>(h, {cls("explain-hint-item")});
@@ -187,7 +189,7 @@ struct ExplainHints {
                             auto text = open<Span>(h, {cls("explain-hint-text")});
                             h.raw("Sequential scan on ");
                             el<Strong>(h, {}, hint.table);
-                            h.raw(" &mdash; consider adding an index if filtered frequently");
+                            h.raw(" ").raw(icon::dash).raw(" consider adding an index if filtered frequently");
                         }
                     } else {
                         auto idx_name = hint.table + "_" + hint.column + "_idx";
@@ -260,7 +262,7 @@ struct DashboardHealthRibbon {
                 auto checks = open<Div>(h, {cls("dash-checks")});
                 for (auto& c : p.checks) {
                     auto v = (c.status == "ok") ? "success" : (c.status == "warning") ? "warning" : "danger";
-                    auto icon_str = (c.status == "ok") ? "&#10003;" : (c.status == "warning") ? "&#9888;" : "&#10007;";
+                    auto icon_str = (c.status == "ok") ? icon::check : (c.status == "warning") ? icon::warning : icon::cross;
                     {
                         auto check = open<Div>(h, {
                             cls(join("dash-check", "dash-check-" + std::string(v))),
@@ -306,21 +308,13 @@ struct QueryRowBatch {
                     auto val = result.get(row_idx, c);
                     auto col_name = result.column_name(c);
                     auto table_oid = result.column_table_oid(c);
-                    std::initializer_list<Attr> attrs = (val.size() > 80)
-                        ? std::initializer_list<Attr>{cls("dv-cell dv-cell-long"),
-                            data("col", col_name),
-                            data("table-oid", std::to_string(table_oid)),
-                            data("full", val)}
-                        : std::initializer_list<Attr>{cls("dv-cell"),
-                            data("col", col_name),
-                            data("table-oid", std::to_string(table_oid))};
                     if (val.size() > 80) {
                         auto span = open<Span>(h, {cls("dv-cell dv-cell-long"),
                             data("col", col_name),
                             data("table-oid", std::to_string(table_oid)),
                             data("full", val)});
                         h.text(val.substr(0, 60));
-                        h.raw("&hellip;");
+                        h.raw(icon::ellipsis);
                     } else {
                         el<Span>(h, {cls("dv-cell"),
                             data("col", col_name),
