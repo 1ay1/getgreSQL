@@ -1,13 +1,17 @@
 #pragma once
 
 // ─── Admin Page SSR Components ───────────────────────────────────────
-// Renders: Unused Indexes, Permissions, Explain Hints, Connection Pages
-// All UI markup lives here. Handlers pass data, components render HTML.
+// All UI markup uses the compile-time HTML+CSS+JS DSL. Zero raw HTML.
 
 #include "ssr/engine.hpp"
+#include "ssr/html_dsl.hpp"
+#include "ssr/css_dsl.hpp"
+#include "ssr/js_dsl.hpp"
+#include "ssr/ui.hpp"
 #include "ssr/components/table.hpp"
 #include "ssr/components/alert.hpp"
 
+#include <format>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -31,48 +35,55 @@ struct UnusedIndexPage {
     };
 
     static auto render(const Props& p, Html& h) -> void {
-        h.raw("<div style=\"max-width:960px;margin:0 auto;padding:var(--sp-5)\">"
-              "<div style=\"display:flex;align-items:center;gap:var(--sp-3);margin-bottom:var(--sp-4)\">"
-              "<h3 style=\"margin:0\">Unused Indexes</h3>"
-              "<span style=\"color:var(--text-3);font-size:var(--font-size-xs)\">"
-              "Indexes with zero scans (excluding primary keys and unique constraints)</span>"
-              "</div>");
-
-        if (p.indexes.empty()) {
-            h.raw("<div class=\"empty-state\"><div class=\"empty-icon\">&#9889;</div>"
-                  "<p>No unused indexes found. Your database is well-optimized.</p></div>");
-        } else {
-            long long total_waste = 0;
-            for (auto& idx : p.indexes) total_waste += idx.size_bytes;
-
-            h.raw("<div class=\"query-info\" style=\"margin-bottom:var(--sp-3)\">"
-                  "<span class=\"rows-badge\">").raw(std::to_string(p.indexes.size()))
-             .raw(" unused indexes</span>"
-                  "<span class=\"time-badge\">Wasting ");
-            if (total_waste >= 1048576) h.raw(std::format("{:.1f} MB", total_waste / 1048576.0));
-            else h.raw(std::format("{:.1f} KB", total_waste / 1024.0));
-            h.raw("</span></div>");
-
-            Table::begin(h, {
-                {"Schema", "", true}, {"Table", "", true}, {"Index", "", true},
-                {"Size", "num", true}, {"Definition", "", false}, {"", "", false}
-            });
-            for (auto& idx : p.indexes) {
-                auto def_short = idx.definition.size() > 60
-                    ? idx.definition.substr(0, 60) + "..." : idx.definition;
-                Table::row(h, {
-                    idx.schema, idx.table, idx.index, idx.size,
-                    "<code title=\"" + idx.definition + "\">" + def_short + "</code>",
-                    "<button class=\"btn btn-sm btn-danger\" "
-                    "hx-post=\"/admin/drop-index\" "
-                    "hx-vals='{\"schema\":\"" + idx.schema + "\",\"index\":\"" + idx.index + "\"}' "
-                    "hx-target=\"closest tr\" hx-swap=\"outerHTML\" "
-                    "hx-confirm=\"DROP INDEX " + idx.schema + "." + idx.index + "?\">Drop</button>"
-                });
+        using namespace html;
+        {
+            auto wrap = open<Div>(h, {style("max-width:960px;margin:0 auto;padding:var(--sp-5)")});
+            {
+                auto header = open<Div>(h, {style("display:flex;align-items:center;gap:var(--sp-3);margin-bottom:var(--sp-4)")});
+                el<H3>(h, {style("margin:0")}, "Unused Indexes");
+                el<Span>(h, {style("color:var(--text-3);font-size:var(--font-size-xs)")},
+                    "Indexes with zero scans (excluding primary keys and unique constraints)");
             }
-            Table::end(h);
+
+            if (p.indexes.empty()) {
+                {
+                    auto empty = open<Div>(h, {cls("empty-state")});
+                    el_raw<Div>(h, {cls("empty-icon")}, "&#9889;");
+                    el<P>(h, {}, "No unused indexes found. Your database is well-optimized.");
+                }
+            } else {
+                long long total_waste = 0;
+                for (auto& idx : p.indexes) total_waste += idx.size_bytes;
+
+                auto waste_str = total_waste >= 1048576
+                    ? std::format("{:.1f} MB", total_waste / 1048576.0)
+                    : std::format("{:.1f} KB", total_waste / 1024.0);
+                {
+                    auto info = open<Div>(h, {cls("query-info"), style("margin-bottom:var(--sp-3)")});
+                    el<Span>(h, {cls("rows-badge")}, std::to_string(p.indexes.size()) + " unused indexes");
+                    el<Span>(h, {cls("time-badge")}, "Wasting " + waste_str);
+                }
+
+                Table::begin(h, {
+                    {"Schema", "", true}, {"Table", "", true}, {"Index", "", true},
+                    {"Size", "num", true}, {"Definition", "", false}, {"", "", false}
+                });
+                for (auto& idx : p.indexes) {
+                    auto def_short = idx.definition.size() > 60
+                        ? idx.definition.substr(0, 60) + "..." : idx.definition;
+                    Table::row(h, {
+                        idx.schema, idx.table, idx.index, idx.size,
+                        "<code title=\"" + idx.definition + "\">" + def_short + "</code>",
+                        "<button class=\"btn btn-sm btn-danger\" "
+                        "hx-post=\"/admin/drop-index\" "
+                        "hx-vals='{\"schema\":\"" + idx.schema + "\",\"index\":\"" + idx.index + "\"}' "
+                        "hx-target=\"closest tr\" hx-swap=\"outerHTML\" "
+                        "hx-confirm=\"DROP INDEX " + idx.schema + "." + idx.index + "?\">Drop</button>"
+                    });
+                }
+                Table::end(h);
+            }
         }
-        h.raw("</div>");
     }
 };
 
@@ -98,44 +109,55 @@ struct PermissionAuditPage {
     };
 
     static auto render(const Props& p, Html& h) -> void {
-        h.raw("<div style=\"max-width:960px;margin:0 auto;padding:var(--sp-5)\">"
-              "<h3>Permission Audit</h3>");
+        using namespace html;
+        {
+            auto wrap = open<Div>(h, {style("max-width:960px;margin:0 auto;padding:var(--sp-5)")});
+            el<H3>(h, {}, "Permission Audit");
 
-        if (!p.memberships.empty()) {
-            h.raw("<div class=\"dashboard-section\" style=\"margin-bottom:var(--sp-4)\">"
-                  "<div class=\"dashboard-section-header\">Role Memberships</div>"
-                  "<div class=\"dashboard-section-body\">");
-            Table::begin(h, {{"Role", "", true}, {"Member Of", "", true}});
-            for (auto& m : p.memberships) {
-                Table::row(h, {m.role, m.member_of});
+            if (!p.memberships.empty()) {
+                {
+                    auto section = open<Div>(h, {cls("dashboard-section"), style("margin-bottom:var(--sp-4)")});
+                    el<Div>(h, {cls("dashboard-section-header")}, "Role Memberships");
+                    {
+                        auto body = open<Div>(h, {cls("dashboard-section-body")});
+                        Table::begin(h, {{"Role", "", true}, {"Member Of", "", true}});
+                        for (auto& m : p.memberships) Table::row(h, {m.role, m.member_of});
+                        Table::end(h);
+                    }
+                }
             }
-            Table::end(h);
-            h.raw("</div></div>");
-        }
 
-        if (p.grants.empty()) {
-            h.raw("<div class=\"empty-state\"><p>No custom table permissions found</p></div>");
-        } else {
-            h.raw("<div class=\"dashboard-section\">"
-                  "<div class=\"dashboard-section-header\">Table Permissions"
-                  "<span class=\"badge\" style=\"margin-left:var(--sp-2)\">")
-             .raw(std::to_string(p.grants.size())).raw(" grants</span></div>"
-                  "<div class=\"dashboard-section-body\">");
-            Table::begin(h, {
-                {"Role", "", true}, {"Schema", "", true}, {"Table", "", true},
-                {"Privilege", "", true}, {"Grantable", "", true}
-            });
-            for (auto& g : p.grants) {
-                Table::row(h, {
-                    g.grantee, g.schema, g.table, g.privilege,
-                    g.is_grantable ? "<span class=\"badge badge-success\">YES</span>" : "NO"
-                });
+            if (p.grants.empty()) {
+                {
+                    auto empty = open<Div>(h, {cls("empty-state")});
+                    el<P>(h, {}, "No custom table permissions found");
+                }
+            } else {
+                {
+                    auto section = open<Div>(h, {cls("dashboard-section")});
+                    {
+                        auto hdr = open<Div>(h, {cls("dashboard-section-header")});
+                        h.raw("Table Permissions");
+                        el<Span>(h, {cls("badge"), style("margin-left:var(--sp-2)")},
+                            std::to_string(p.grants.size()) + " grants");
+                    }
+                    {
+                        auto body = open<Div>(h, {cls("dashboard-section-body")});
+                        Table::begin(h, {
+                            {"Role", "", true}, {"Schema", "", true}, {"Table", "", true},
+                            {"Privilege", "", true}, {"Grantable", "", true}
+                        });
+                        for (auto& g : p.grants) {
+                            Table::row(h, {
+                                g.grantee, g.schema, g.table, g.privilege,
+                                g.is_grantable ? "<span class=\"badge success\">YES</span>" : "NO"
+                            });
+                        }
+                        Table::end(h);
+                    }
+                }
             }
-            Table::end(h);
-            h.raw("</div></div>");
         }
-
-        h.raw("</div>");
     }
 };
 
@@ -143,7 +165,7 @@ struct PermissionAuditPage {
 
 struct IndexHint {
     std::string table;
-    std::string column;  // empty = general seq scan warning
+    std::string column;
 };
 
 struct ExplainHints {
@@ -153,29 +175,43 @@ struct ExplainHints {
 
     static auto render(const Props& p, Html& h) -> void {
         if (p.hints.empty()) return;
-
-        h.raw("<div class=\"explain-hints\">"
-              "<div class=\"explain-hints-header\">&#128161; Index Suggestions</div>");
-        for (auto& hint : p.hints) {
-            h.raw("<div class=\"explain-hint-item\">");
-            if (hint.column.empty()) {
-                h.raw("<span class=\"explain-hint-text\">Sequential scan on <strong>")
-                 .text(hint.table)
-                 .raw("</strong> &mdash; consider adding an index if filtered frequently</span>");
-            } else {
-                auto idx_name = hint.table + "_" + hint.column + "_idx";
-                auto create_sql = "CREATE INDEX CONCURRENTLY " + idx_name +
-                    " ON " + hint.table + " (" + hint.column + ");";
-                h.raw("<span class=\"explain-hint-text\">Sequential scan on <strong>")
-                 .text(hint.table)
-                 .raw("</strong> filtered by <code>").text(hint.column).raw("</code></span>");
-                h.raw("<button class=\"btn btn-sm btn-ghost\" onclick=\"navigator.clipboard.writeText('")
-                 .text(create_sql).raw("'); this.textContent='Copied!'\" title=\"")
-                 .text(create_sql).raw("\">Copy CREATE INDEX</button>");
+        using namespace html;
+        {
+            auto wrap = open<Div>(h, {cls("explain-hints")});
+            el_raw<Div>(h, {cls("explain-hints-header")}, "&#128161; Index Suggestions");
+            for (auto& hint : p.hints) {
+                {
+                    auto item = open<Div>(h, {cls("explain-hint-item")});
+                    if (hint.column.empty()) {
+                        {
+                            auto text = open<Span>(h, {cls("explain-hint-text")});
+                            h.raw("Sequential scan on ");
+                            el<Strong>(h, {}, hint.table);
+                            h.raw(" &mdash; consider adding an index if filtered frequently");
+                        }
+                    } else {
+                        auto idx_name = hint.table + "_" + hint.column + "_idx";
+                        auto create_sql = "CREATE INDEX CONCURRENTLY " + idx_name +
+                            " ON " + hint.table + " (" + hint.column + ");";
+                        {
+                            auto text = open<Span>(h, {cls("explain-hint-text")});
+                            h.raw("Sequential scan on ");
+                            el<Strong>(h, {}, hint.table);
+                            h.raw(" filtered by ");
+                            el<Code>(h, {}, hint.column);
+                        }
+                        el<Button>(h, {
+                            cls("btn btn-sm btn-ghost"),
+                            js::on_click(js::then(
+                                js::copy_to_clipboard(create_sql),
+                                js::set_text("Copied!")
+                            )),
+                            title(create_sql),
+                        }, "Copy CREATE INDEX");
+                    }
+                }
             }
-            h.raw("</div>");
         }
-        h.raw("</div>");
     }
 };
 
@@ -196,79 +232,131 @@ struct ConnectionsPage {
     };
 
     static auto render(const Props& p, Html& h) -> void {
-        h.raw("<div style=\"max-width:720px;margin:0 auto;padding:var(--sp-5)\">");
+        using namespace html;
+        {
+            auto wrap = open<Div>(h, {style("max-width:720px;margin:0 auto;padding:var(--sp-5)")});
 
-        // Current connection
-        h.raw("<div class=\"conn-current\">"
-              "<h3>Current Connection</h3>"
-              "<div class=\"conn-info-card\">"
-              "<span class=\"conn-dot-lg\"></span>"
-              "<div><strong>").text(p.current_db).raw("</strong>"
-              "<div class=\"conn-url\">").text(p.current_url).raw("</div>"
-              "</div></div></div>");
+            // Current connection
+            {
+                auto section = open<Div>(h, {cls("conn-current")});
+                el<H3>(h, {}, "Current Connection");
+                {
+                    auto card = open<Div>(h, {cls("conn-info-card")});
+                    el<Span>(h, {cls("conn-dot-lg")});
+                    {
+                        auto info = open<Div>(h);
+                        el<Strong>(h, {}, p.current_db);
+                        el<Div>(h, {cls("conn-url")}, p.current_url);
+                    }
+                }
+            }
 
-        // Add form
-        h.raw("<div class=\"conn-add-section\">"
-              "<h3>Add Connection</h3>"
-              "<form hx-post=\"/connections/save\" hx-target=\"#conn-list\" hx-swap=\"innerHTML\">"
-              "<div class=\"conn-form-grid\">"
-              "<div class=\"form-field\"><label>Name</label>"
-              "<input type=\"text\" name=\"name\" placeholder=\"Production DB\" required class=\"form-input\"></div>"
-              "<div class=\"form-field\"><label>Connection URL</label>"
-              "<input type=\"text\" name=\"url\" placeholder=\"postgresql://user:pass@host/db\" required class=\"form-input\"></div>"
-              "<div class=\"form-field\"><label>Color</label>"
-              "<select name=\"color\" class=\"form-input\">"
-              "<option value=\"\">Default</option>"
-              "<option value=\"#3b82f6\">Blue</option>"
-              "<option value=\"#10b981\">Green</option>"
-              "<option value=\"#f59e0b\">Amber</option>"
-              "<option value=\"#ef4444\">Red</option>"
-              "<option value=\"#8b5cf6\">Purple</option>"
-              "<option value=\"#ec4899\">Pink</option>"
-              "</select></div></div>"
-              "<div class=\"conn-form-actions\">"
-              "<button type=\"button\" class=\"btn btn-sm\" hx-post=\"/connections/test\" "
-              "hx-include=\"closest form\" hx-target=\"#test-result\" hx-swap=\"innerHTML\">Test</button>"
-              "<button type=\"submit\" class=\"btn btn-sm btn-primary\">Save Connection</button>"
-              "</div><div id=\"test-result\"></div></form></div>");
+            // Add form
+            {
+                auto section = open<Div>(h, {cls("conn-add-section")});
+                el<H3>(h, {}, "Add Connection");
+                {
+                    auto form = open<Form>(h, {hx_post("/connections/save"),
+                                               hx_target("#conn-list"), hx_swap("innerHTML")});
+                    {
+                        auto grid = open<Div>(h, {cls("conn-form-grid")});
+                        {
+                            auto f = open<Div>(h, {cls("form-field")});
+                            el<Label>(h, {}, "Name");
+                            void_el<Input>(h, {type("text"), name("name"),
+                                              placeholder("Production DB"), required(), cls("form-input")});
+                        }
+                        {
+                            auto f = open<Div>(h, {cls("form-field")});
+                            el<Label>(h, {}, "Connection URL");
+                            void_el<Input>(h, {type("text"), name("url"),
+                                              placeholder("postgresql://user:pass@host/db"), required(), cls("form-input")});
+                        }
+                        {
+                            auto f = open<Div>(h, {cls("form-field")});
+                            el<Label>(h, {}, "Color");
+                            {
+                                auto sel = open<Select>(h, {name("color"), cls("form-input")});
+                                el<Option>(h, {value("")}, "Default");
+                                el<Option>(h, {value("#3b82f6")}, "Blue");
+                                el<Option>(h, {value("#10b981")}, "Green");
+                                el<Option>(h, {value("#f59e0b")}, "Amber");
+                                el<Option>(h, {value("#ef4444")}, "Red");
+                                el<Option>(h, {value("#8b5cf6")}, "Purple");
+                                el<Option>(h, {value("#ec4899")}, "Pink");
+                            }
+                        }
+                    }
+                    {
+                        auto actions = open<Div>(h, {cls("conn-form-actions")});
+                        el<Button>(h, {type("button"), cls("btn btn-sm"),
+                                      hx_post("/connections/test"),
+                                      hx_include("closest form"),
+                                      hx_target("#test-result"), hx_swap("innerHTML")}, "Test");
+                        el<Button>(h, {type("submit"), cls("btn btn-sm btn-primary")}, "Save Connection");
+                    }
+                    el<Div>(h, {id("test-result")});
+                }
+            }
 
-        // Saved list
-        h.raw("<div class=\"conn-saved-section\"><h3>Saved Connections</h3>"
-              "<div id=\"conn-list\">");
-        render_list(p.connections, p.current_url, h);
-        h.raw("</div></div></div>");
+            // Saved list
+            {
+                auto section = open<Div>(h, {cls("conn-saved-section")});
+                el<H3>(h, {}, "Saved Connections");
+                {
+                    auto list = open<Div>(h, {id("conn-list")});
+                    render_list(p.connections, p.current_url, h);
+                }
+            }
+        }
     }
 
     static auto render_list(const std::vector<ConnectionInfo>& conns,
                             std::string_view current_url, Html& h) -> void {
+        using namespace html;
         if (conns.empty()) {
-            h.raw("<div class=\"empty-state\"><div class=\"empty-icon\">&#128268;</div>"
-                  "<p>No saved connections. Add one above.</p></div>");
+            {
+                auto empty = open<Div>(h, {cls("empty-state")});
+                el_raw<Div>(h, {cls("empty-icon")}, "&#128268;");
+                el<P>(h, {}, "No saved connections. Add one above.");
+            }
             return;
         }
         for (auto& c : conns) {
             bool active = (c.url == current_url);
-            h.raw("<div class=\"conn-item");
-            if (active) h.raw(" conn-active");
-            h.raw("\"");
-            if (!c.color.empty()) h.raw(" style=\"border-left:3px solid ").raw(c.color).raw("\"");
-            h.raw("><div class=\"conn-item-info\"><strong>").text(c.name).raw("</strong>");
-            if (active) h.raw(" <span class=\"badge badge-success\">active</span>");
-            h.raw("<div class=\"conn-url\">").text(c.url).raw("</div></div>"
-                  "<div class=\"conn-item-actions\">");
-            if (!active) {
-                h.raw("<button class=\"btn btn-sm btn-primary\" "
-                      "hx-post=\"/connections/switch\" "
-                      "hx-vals='{\"name\":\"").text(c.name).raw("\"}' "
-                      "hx-confirm=\"Switch to ").text(c.name).raw("?\" "
-                      "hx-target=\"body\">Switch</button>");
+            auto item_cls = std::string("conn-item");
+            if (active) item_cls += " conn-active";
+            auto item_style = c.color.empty() ? std::string{} : "border-left:3px solid " + c.color;
+            {
+                auto item = open<Div>(h, item_style.empty()
+                    ? std::initializer_list<Attr>{cls(item_cls)}
+                    : std::initializer_list<Attr>{cls(item_cls), style(item_style)});
+                {
+                    auto info = open<Div>(h, {cls("conn-item-info")});
+                    el<Strong>(h, {}, c.name);
+                    if (active) el<Span>(h, {cls("badge success")}, "active");
+                    el<Div>(h, {cls("conn-url")}, c.url);
+                }
+                {
+                    auto actions = open<Div>(h, {cls("conn-item-actions")});
+                    if (!active) {
+                        el<Button>(h, {
+                            cls("btn btn-sm btn-primary"),
+                            hx_post("/connections/switch"),
+                            hx_vals("{\"name\":\"" + c.name + "\"}"),
+                            hx_confirm("Switch to " + c.name + "?"),
+                            hx_target("body"),
+                        }, "Switch");
+                    }
+                    el<Button>(h, {
+                        cls("btn btn-sm btn-danger"),
+                        hx_post("/connections/delete"),
+                        hx_vals("{\"name\":\"" + c.name + "\"}"),
+                        hx_target("#conn-list"), hx_swap("innerHTML"),
+                        hx_confirm("Delete " + c.name + "?"),
+                    }, "Delete");
+                }
             }
-            h.raw("<button class=\"btn btn-sm btn-danger\" "
-                  "hx-post=\"/connections/delete\" "
-                  "hx-vals='{\"name\":\"").text(c.name).raw("\"}' "
-                  "hx-target=\"#conn-list\" hx-swap=\"innerHTML\" "
-                  "hx-confirm=\"Delete ").text(c.name).raw("?\">Delete</button>"
-                  "</div></div>\n");
         }
     }
 };
@@ -287,12 +375,14 @@ struct HealthCheckData {
 struct DashboardHealthRibbon {
     struct Props {
         std::vector<HealthCheckData> checks;
-        std::string toast_message;  // non-empty after a fix action
+        std::string toast_message;
     };
 
     static auto render(const Props& p, Html& h) -> void {
+        using namespace html;
+
         if (!p.toast_message.empty()) {
-            h.raw("<div class=\"dash-fix-toast\">").text(p.toast_message).raw("</div>");
+            el<Div>(h, {cls("dash-fix-toast")}, p.toast_message);
         }
 
         int ok = 0, warn = 0, crit = 0;
@@ -304,32 +394,41 @@ struct DashboardHealthRibbon {
         auto overall = crit > 0 ? "critical" : warn > 0 ? "degraded" : "healthy";
         auto overall_cls = crit > 0 ? "danger" : warn > 0 ? "warning" : "success";
 
-        h.raw("<div class=\"dash-hero\">"
-              "<div class=\"dash-hero-status dash-hero-").raw(overall_cls).raw("\">"
-              "<div class=\"dash-hero-pulse\"></div>"
-              "<span class=\"dash-hero-dot\"></span>"
-              "<span class=\"dash-hero-label\">System ").raw(overall).raw("</span></div>"
-              "<div class=\"dash-checks\">");
-
-        for (auto& c : p.checks) {
-            auto v = (c.status == "ok") ? "success" : (c.status == "warning") ? "warning" : "danger";
-            auto icon = (c.status == "ok") ? "&#10003;" : (c.status == "warning") ? "&#9888;" : "&#10007;";
-            h.raw("<div class=\"dash-check dash-check-").raw(v).raw("\" title=\"")
-             .text(c.name).raw(": ").text(c.detail).raw("\">"
-              "<span class=\"dash-check-icon\">").raw(icon).raw("</span>"
-              "<span class=\"dash-check-name\">").text(c.name).raw("</span>"
-              "<span class=\"dash-check-val\">").text(c.value).raw("</span>");
-            if (!c.fix_action.empty() && c.status != "ok") {
-                h.raw("<button class=\"dash-fix-btn\" "
-                      "hx-post=\"/dashboard/fix\" "
-                      "hx-vals='{\"action\":\"").raw(c.fix_action).raw("\"}' "
-                      "hx-target=\"#dash-health\" hx-swap=\"innerHTML\" "
-                      "hx-confirm=\"").text(c.fix_label).raw(" &mdash; are you sure?\">"
-                      ).text(c.fix_label).raw("</button>");
+        {
+            auto hero = open<Div>(h, {cls("dash-hero")});
+            {
+                auto status = open<Div>(h, {cls(join("dash-hero-status", "dash-hero-" + std::string(overall_cls)))});
+                el<Div>(h, {cls("dash-hero-pulse")});
+                el<Span>(h, {cls("dash-hero-dot")});
+                el_raw<Span>(h, {cls("dash-hero-label")}, "System " + std::string(overall));
             }
-            h.raw("</div>");
+            {
+                auto checks = open<Div>(h, {cls("dash-checks")});
+                for (auto& c : p.checks) {
+                    auto v = (c.status == "ok") ? "success" : (c.status == "warning") ? "warning" : "danger";
+                    auto icon_str = (c.status == "ok") ? "&#10003;" : (c.status == "warning") ? "&#9888;" : "&#10007;";
+                    {
+                        auto check = open<Div>(h, {
+                            cls(join("dash-check", "dash-check-" + std::string(v))),
+                            title(c.name + ": " + c.detail),
+                        });
+                        el_raw<Span>(h, {cls("dash-check-icon")}, icon_str);
+                        el<Span>(h, {cls("dash-check-name")}, c.name);
+                        el<Span>(h, {cls("dash-check-val")}, c.value);
+                        if (!c.fix_action.empty() && c.status != "ok") {
+                            el<Button>(h, {
+                                cls("dash-fix-btn"),
+                                hx_post("/dashboard/fix"),
+                                hx_vals("{\"action\":\"" + c.fix_action + "\"}"),
+                                hx_target("#dash-health"),
+                                hx_swap("innerHTML"),
+                                hx_confirm(c.fix_label + " — are you sure?"),
+                            }, c.fix_label);
+                        }
+                    }
+                }
+            }
         }
-        h.raw("</div></div>");
     }
 };
 
@@ -339,32 +438,43 @@ struct QueryRowBatch {
     static auto render_row(Html& h, int col_start, int col_count,
                            const auto& result, int row_idx,
                            bool has_ctid) -> void {
+        using namespace html;
         auto ctid = has_ctid ? std::string_view(result.get(row_idx, 0)) : std::string_view("");
-        h.raw("<tr");
-        if (!ctid.empty()) h.raw(" data-ctid=\"").text(ctid).raw("\"");
-        h.raw(">");
-        for (int c = col_start; c < col_count; ++c) {
-            h.raw("<td>");
-            if (result.is_null(row_idx, c)) {
-                h.raw("<span class=\"null-value dv-cell\">NULL</span>");
-            } else {
-                auto val = result.get(row_idx, c);
-                auto col_name = result.column_name(c);
-                auto table_oid = result.column_table_oid(c);
-                h.raw("<span class=\"dv-cell\"");
-                if (!col_name.empty()) h.raw(" data-col=\"").text(col_name).raw("\"");
-                if (table_oid != 0) h.raw(" data-table-oid=\"").raw(std::to_string(table_oid)).raw("\"");
-                if (val.size() > 80) {
-                    h.raw(" data-full=\"").text(val).raw("\">");
-                    h.text(val.substr(0, 60)).raw("&hellip;");
+        {
+            auto tr = ctid.empty()
+                ? open<Tr>(h)
+                : open<Tr>(h, {data("ctid", ctid)});
+            for (int c = col_start; c < col_count; ++c) {
+                auto td_scope = open<Td>(h);
+                if (result.is_null(row_idx, c)) {
+                    el<Span>(h, {cls("null-value dv-cell")}, "NULL");
                 } else {
-                    h.raw(">").text(val);
+                    auto val = result.get(row_idx, c);
+                    auto col_name = result.column_name(c);
+                    auto table_oid = result.column_table_oid(c);
+                    std::initializer_list<Attr> attrs = (val.size() > 80)
+                        ? std::initializer_list<Attr>{cls("dv-cell dv-cell-long"),
+                            data("col", col_name),
+                            data("table-oid", std::to_string(table_oid)),
+                            data("full", val)}
+                        : std::initializer_list<Attr>{cls("dv-cell"),
+                            data("col", col_name),
+                            data("table-oid", std::to_string(table_oid))};
+                    if (val.size() > 80) {
+                        auto span = open<Span>(h, {cls("dv-cell dv-cell-long"),
+                            data("col", col_name),
+                            data("table-oid", std::to_string(table_oid)),
+                            data("full", val)});
+                        h.text(val.substr(0, 60));
+                        h.raw("&hellip;");
+                    } else {
+                        el<Span>(h, {cls("dv-cell"),
+                            data("col", col_name),
+                            data("table-oid", std::to_string(table_oid))}, val);
+                    }
                 }
-                h.raw("</span>");
             }
-            h.raw("</td>");
         }
-        h.raw("</tr>\n");
     }
 };
 

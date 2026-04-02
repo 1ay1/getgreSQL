@@ -63,10 +63,12 @@ static auto form_value(std::string_view body, std::string_view key) -> std::stri
 
 auto QueryPageHandler::handle(Request& req, AppContext& /*ctx*/) -> Response {
     if (req.is_htmx()) {
-        return Response::html(R"(<div id="query-workspace" class="query-panel"></div>)");
+        return Response::html(render_partial([](Html& h) {
+            html::el<html::Div>(h, {html::id("query-workspace"), html::cls("query-panel")});
+        }));
     }
     return Response::html(render_page_full("Query", "Query", [](Html& h) {
-        h.raw(R"(<div id="query-workspace" class="query-panel"></div>)");
+        html::el<html::Div>(h, {html::id("query-workspace"), html::cls("query-panel")});
     }));
 }
 
@@ -132,7 +134,12 @@ auto QueryExecHandler::handle(Request& req, AppContext& ctx) -> Response {
 
     if (!result) {
         auto h = Html::with_capacity(1024);
-        h.raw("<div class=\"query-error\"><strong>Error:</strong> ").text(error_message(result.error())).raw("</div>");
+        {
+            auto err = html::open<html::Div>(h, {html::cls("query-error")});
+            html::el<html::Strong>(h, {}, "Error:");
+            h.raw(" ");
+            h.text(error_message(result.error()));
+        }
         return Response::html(std::move(h).finish());
     }
 
@@ -350,25 +357,35 @@ auto ExplainExecHandler::handle(Request& req, AppContext& ctx) -> Response {
 
     if (!result) {
         auto h = Html::with_capacity(1024);
-        h.raw(R"(<div class="query-error"><strong>Error:</strong> )").text(error_message(result.error())).raw("</div>");
+        {
+            auto err = html::open<html::Div>(h, {html::cls("query-error")});
+            html::el<html::Strong>(h, {}, "Error:");
+            h.raw(" ");
+            h.text(error_message(result.error()));
+        }
         return Response::html(std::move(h).finish());
     }
 
     auto h = Html::with_capacity(4096);
 
     if (analyze) {
-        h.raw(std::format(
-            R"(<div class="query-info"><span class="rows-badge">Planning: {:.3f} ms</span> <span class="time-badge">Execution: {:.3f} ms</span> <span class="time-badge">Wall: {} ms</span></div>)",
-            result->planning_time, result->execution_time, ms
-        ));
+        auto info = html::open<html::Div>(h, {html::cls("query-info")});
+        html::el<html::Span>(h, {html::cls("rows-badge")}, std::format("Planning: {:.3f} ms", result->planning_time));
+        h.raw(" ");
+        html::el<html::Span>(h, {html::cls("time-badge")}, std::format("Execution: {:.3f} ms", result->execution_time));
+        h.raw(" ");
+        html::el<html::Span>(h, {html::cls("time-badge")}, std::format("Wall: {} ms", ms));
     } else {
-        h.raw(std::format(
-            R"(<div class="query-info"><span class="rows-badge">Cost: {:.2f}</span> <span class="time-badge">Wall: {} ms</span></div>)",
-            result->total_cost, ms
-        ));
+        auto info = html::open<html::Div>(h, {html::cls("query-info")});
+        html::el<html::Span>(h, {html::cls("rows-badge")}, std::format("Cost: {:.2f}", result->total_cost));
+        h.raw(" ");
+        html::el<html::Span>(h, {html::cls("time-badge")}, std::format("Wall: {} ms", ms));
     }
 
-    h.raw("<div style=\"padding:var(--sp-4)\"><div class=\"explain-plan\">").text(result->plan_text).raw("</div></div>");
+    {
+        auto wrap = html::open<html::Div>(h, {html::style("padding:var(--sp-4)")});
+        html::el<html::Div>(h, {html::cls("explain-plan")}, result->plan_text);
+    }
 
     // ── Index hints: detect Seq Scan on tables with filter conditions ──
     auto& plan = result->plan_text;

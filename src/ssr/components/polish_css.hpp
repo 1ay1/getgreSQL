@@ -6,15 +6,7 @@ namespace getgresql::ssr {
 
 struct PolishCSS {
     static constexpr auto css() -> std::string_view { return R"_CSS_(
-/* ─── Global scrollbars ───────────────────────────────────────────────── */
-* { scrollbar-width: thin; scrollbar-color: var(--bg-4) transparent; }
-::-webkit-scrollbar { width: 8px; height: 8px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--bg-4); border-radius: 4px; border: 2px solid transparent; background-clip: content-box; }
-::-webkit-scrollbar-thumb:hover { background: var(--text-4); background-clip: content-box; }
-::-webkit-scrollbar-corner { background: transparent; }
-
-/* Thin scrollbars in tight areas */
+/* ─── Thin scrollbars in tight areas (global scrollbar in theme.hpp) ───── */
 .sidebar-tree::-webkit-scrollbar, .ac-popup::-webkit-scrollbar,
 .table-wrapper::-webkit-scrollbar { width: 6px; height: 6px; }
 
@@ -172,7 +164,7 @@ td code {
 
 .ctx-menu {
     position: fixed;
-    z-index: 10000;
+    z-index: var(--z-overlay);
     background: var(--bg-1);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
@@ -231,7 +223,7 @@ td code {
     justify-content: space-between;
     padding: var(--sp-2) var(--sp-3);
     background: var(--accent-subtle);
-    border: 1px solid rgba(56, 139, 253, 0.2);
+    border: 1px solid var(--accent-border);
     border-radius: var(--radius);
     margin-bottom: var(--sp-2);
     font-size: var(--font-size-xs);
@@ -248,7 +240,7 @@ td code {
     padding: 2px 6px;
     background: var(--bg-0);
     border: 1px solid var(--accent);
-    border-radius: 3px;
+    border-radius: var(--radius);
     color: var(--text-0);
     font-size: var(--font-size-xs);
     font-family: var(--font-mono);

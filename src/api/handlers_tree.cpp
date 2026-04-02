@@ -138,7 +138,9 @@ auto TreeTablesHandler::handle(Request& req, AppContext& ctx) -> Response {
     for (auto& t : *tables) {
         auto href = std::format("/db/{}/schema/{}/table/{}", db_name, schema_name, html::escape(t.name));
         auto icon = t.type == "view" ? "view" : "table";
-        auto size_extra = std::format("<span class=\"tree-badge\">{}</span>", html::escape(t.size));
+        auto size_extra = ssr::render_partial([&](ssr::Html& ph) {
+            ssr::html::el<ssr::html::Span>(ph, {ssr::html::cls("tree-badge")}, t.size);
+        }, 128);
         ssr::TreeNode::leaf(h, icon, t.name, href, 4, size_extra);
     }
     return Response::html(std::move(h).finish());

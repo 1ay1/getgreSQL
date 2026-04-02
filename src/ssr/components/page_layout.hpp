@@ -1,6 +1,9 @@
 #pragma once
 #include "ssr/engine.hpp"
+#include "ssr/html_dsl.hpp"
+#include "ssr/js_dsl.hpp"
 #include <concepts>
+#include <string>
 #include <string_view>
 
 namespace getgresql::ssr {
@@ -13,100 +16,172 @@ struct PageLayout {
 
     template<std::invocable<Html&> F>
     static auto render(const Props& p, Html& h, F&& content_fn) -> void {
+        using namespace html;
         render_head(p, h);
-        h.raw("<div class=\"ide\">\n");
-        render_toolbar(p, h);
-        render_sidebar(h);
-        h.raw("<div class=\"workspace\">\n  <div class=\"tab-bar\">\n    <div class=\"tab active\"><span class=\"tab-label\">");
-        h.text(p.title);
-        h.raw("</span></div>\n    <div class=\"tab-bar-end\"></div>\n  </div>\n  <div class=\"content\">\n");
-        content_fn(h);
-        h.raw("  </div>\n</div>\n");
-        render_status_bar(h);
-        h.raw("</div>\n</body>\n</html>\n");
+        {
+            auto ide = open<Div>(h, {cls("ide")});
+            render_toolbar(p, h);
+            render_sidebar(h);
+            {
+                auto ws = open<Div>(h, {cls("workspace")});
+                {
+                    auto tab_bar = open<Div>(h, {cls("tab-bar")});
+                    {
+                        auto tab = open<Div>(h, {cls("tab active")});
+                        el<Span>(h, {cls("tab-label")}, p.title);
+                    }
+                    el<Div>(h, {cls("tab-bar-end")});
+                }
+                {
+                    auto content = open<Div>(h, {cls("content")});
+                    content_fn(h);
+                }
+            }
+            render_status_bar(h);
+        }
+        h.close("body");
+        h.close("html");
     }
 
     template<std::invocable<Html&> F>
     static auto render_full(const Props& p, Html& h, F&& content_fn) -> void {
+        using namespace html;
         render_head(p, h);
-        h.raw("<div class=\"ide\">\n");
-        render_toolbar(p, h);
-        render_sidebar(h);
-        h.raw("<div class=\"workspace\">\n  <div class=\"tab-bar\">\n    <div class=\"tab active\"><span class=\"tab-label\">");
-        h.text(p.title);
-        h.raw("</span></div>\n    <div class=\"tab-bar-end\"></div>\n  </div>\n");
-        content_fn(h);
-        h.raw("</div>\n");
-        render_status_bar(h);
-        h.raw("</div>\n</body>\n</html>\n");
+        {
+            auto ide = open<Div>(h, {cls("ide")});
+            render_toolbar(p, h);
+            render_sidebar(h);
+            {
+                auto ws = open<Div>(h, {cls("workspace")});
+                {
+                    auto tab_bar = open<Div>(h, {cls("tab-bar")});
+                    {
+                        auto tab = open<Div>(h, {cls("tab active")});
+                        el<Span>(h, {cls("tab-label")}, p.title);
+                    }
+                    el<Div>(h, {cls("tab-bar-end")});
+                }
+                content_fn(h);
+            }
+            render_status_bar(h);
+        }
+        h.close("body");
+        h.close("html");
     }
 
 private:
+    // Document structure uses non-RAII open/close because <html>, <body>
+    // must stay open across multiple render_* calls. Closed in render/render_full.
     static auto render_head(const Props& p, Html& h) -> void {
-        h.raw("<!DOCTYPE html>\n<html lang=\"en\" data-theme=\"dark\">\n<head>\n"
-              "    <meta charset=\"utf-8\">\n"
-              "    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"
-              "    <title>");
-        h.text(p.title);
-        h.raw(" - getgreSQL</title>\n"
-              "    <link rel=\"stylesheet\" href=\"/assets/css/components.css\">\n"
-              "    <script src=\"/assets/js/components.js\" defer></script>\n"
-              "</head>\n<body>\n");
+        using namespace html;
+        h.raw("<!DOCTYPE html>\n");
+        h.open("html", "lang=\"en\" data-theme=\"dark\"");
+        {
+            auto head = open<Head>(h);
+            void_el<Meta>(h, {attr("charset", "utf-8")});
+            void_el<Meta>(h, {name("viewport"), attr("content", "width=device-width, initial-scale=1")});
+            {
+                auto t = open<Title>(h);
+                h.text(p.title);
+                h.raw(" - getgreSQL");
+            }
+            void_el<Link>(h, {rel("stylesheet"), href("/assets/css/components.css")});
+            el<Script>(h, {src("/assets/js/components.js"), attr("defer", "")});
+        }
+        h.open("body");
     }
 
     static auto render_toolbar(const Props& p, Html& h) -> void {
-        h.raw("<header class=\"toolbar\">\n"
-              "  <span class=\"toolbar-brand\">getgreSQL<span class=\"version\">v0.1</span></span>\n"
-              "  <span class=\"toolbar-sep\"></span>\n"
-              "  <nav class=\"toolbar-nav\">\n");
-        constexpr struct { const char* href; const char* icon; const char* label; } navs[] = {
-            {"/", "&#9635;", "Dashboard"}, {"/query", "&#9654;", "Query"},
-            {"/monitor", "&#9673;", "Monitor"},
-        };
-        for (auto& n : navs) {
-            h.raw("    <a href=\"").raw(n.href).raw("\" class=\"toolbar-btn");
-            if (p.active_nav == n.label) h.raw(" active");
-            h.raw("\" data-spa><span class=\"icon\">").raw(n.icon).raw("</span> ").raw(n.label).raw("</a>");
+        using namespace html;
+        {
+            auto header = open<Header>(h, {cls("toolbar")});
+            el_raw<Span>(h, {cls("toolbar-brand")}, "getgreSQL<span class=\"version\">v0.1</span>");
+            el<Span>(h, {cls("toolbar-sep")});
+            {
+                auto nav = open<Nav>(h, {cls("toolbar-nav")});
+                constexpr struct { const char* href_; const char* icon; const char* label; } navs[] = {
+                    {"/", "&#9635;", "Dashboard"}, {"/query", "&#9654;", "Query"},
+                    {"/monitor", "&#9673;", "Monitor"},
+                };
+                for (auto& n : navs) {
+                    auto nav_cls = std::string("toolbar-btn");
+                    if (p.active_nav == n.label) nav_cls += " active";
+                    auto a = open<A>(h, {href(n.href_), cls(nav_cls), data("spa", "")});
+                    el_raw<Span>(h, {cls("icon")}, n.icon);
+                    h.raw(" ").raw(n.label);
+                }
+            }
+            el<Span>(h, {cls("toolbar-spacer")});
+            {
+                auto conn = open<A>(h, {href("/connections"), cls("toolbar-conn"), title("Manage Connections")});
+                el<Span>(h, {cls("conn-dot")});
+                el<Span>(h, {cls("conn-label"), id("toolbar-db")}, "Connected");
+            }
+            {
+                auto actions = open<Div>(h, {cls("toolbar-actions")});
+                el_raw<Button>(h, {js::on_click(js::call("openCommandPalette")), cls("toolbar-icon-btn"), title("Command Palette (Ctrl+K)")}, "&#8984;");
+                el_raw<Button>(h, {js::on_click(js::call("toggleSidebar")), cls("toolbar-icon-btn"), title("Toggle Sidebar")}, "&#9776;");
+                el_raw<Button>(h, {js::on_click(js::call("toggleTheme")), cls("toolbar-icon-btn"), title("Theme")}, "&#9680;");
+            }
         }
-        h.raw("  </nav>\n  <span class=\"toolbar-spacer\"></span>\n"
-              "  <a href=\"/connections\" class=\"toolbar-conn\" title=\"Manage Connections\">"
-              "<span class=\"conn-dot\"></span>"
-              "<span class=\"conn-label\" id=\"toolbar-db\">Connected</span></a>\n"
-              "  <div class=\"toolbar-actions\">\n"
-              "    <button onclick=\"openCommandPalette()\" class=\"toolbar-icon-btn\" title=\"Command Palette (Ctrl+K)\">&#8984;</button>\n"
-              "    <button onclick=\"toggleSidebar()\" class=\"toolbar-icon-btn\" title=\"Toggle Sidebar\">&#9776;</button>\n"
-              "    <button onclick=\"toggleTheme()\" class=\"toolbar-icon-btn\" title=\"Theme\">&#9680;</button>\n"
-              "  </div>\n</header>\n");
     }
 
     static auto render_sidebar(Html& h) -> void {
-        h.raw("<aside class=\"sidebar\">\n"
-              "  <div class=\"sidebar-header\">\n"
-              "    <span class=\"sidebar-title\">Explorer</span>\n"
-              "    <div class=\"sidebar-actions\">\n"
-              "      <button class=\"sidebar-icon\" onclick=\"sidebarRefresh()\" title=\"Refresh\">&#8635;</button>\n"
-              "      <button class=\"sidebar-icon\" onclick=\"sidebarCollapseAll()\" title=\"Collapse All\">&#8722;</button>\n"
-              "      <button class=\"sidebar-icon\" onclick=\"toggleSidebar()\" title=\"Hide Sidebar (Ctrl+B)\">&#10005;</button>\n"
-              "    </div>\n  </div>\n"
-              "  <div class=\"sidebar-search\">\n"
-              "    <input type=\"text\" class=\"sidebar-search-input\" id=\"sidebar-filter\" "
-              "placeholder=\"Filter... (type to search)\" autocomplete=\"off\">\n"
-              "  </div>\n"
-              "  <div class=\"sidebar-tree\" id=\"sidebar-tree\" hx-get=\"/tree\" hx-trigger=\"load\" hx-swap=\"innerHTML\">\n"
-              "    <div class=\"loading\">Loading...</div>\n"
-              "  </div>\n  <div class=\"resize-handle\"></div>\n</aside>\n");
+        using namespace html;
+        {
+            auto aside = open<Aside>(h, {cls("sidebar")});
+            {
+                auto header = open<Div>(h, {cls("sidebar-header")});
+                el<Span>(h, {cls("sidebar-title")}, "Explorer");
+                {
+                    auto actions = open<Div>(h, {cls("sidebar-actions")});
+                    el_raw<Button>(h, {cls("sidebar-icon"), js::on_click(js::call("sidebarRefresh")), title("Refresh")}, "&#8635;");
+                    el_raw<Button>(h, {cls("sidebar-icon"), js::on_click(js::call("sidebarCollapseAll")), title("Collapse All")}, "&#8722;");
+                    el_raw<Button>(h, {cls("sidebar-icon"), js::on_click(js::call("toggleSidebar")), title("Hide Sidebar (Ctrl+B)")}, "&#10005;");
+                }
+            }
+            {
+                auto search = open<Div>(h, {cls("sidebar-search")});
+                void_el<Input>(h, {type("text"), cls("sidebar-search-input"), id("sidebar-filter"),
+                                   placeholder("Filter... (type to search)"), autocomplete("off")});
+            }
+            {
+                auto tree = open<Div>(h, {cls("sidebar-tree"), id("sidebar-tree"),
+                                          hx_get("/tree"), hx_trigger("load"), hx_swap("innerHTML")});
+                el<Div>(h, {cls("loading")}, "Loading...");
+            }
+            el<Div>(h, {cls("resize-handle")});
+        }
     }
 
     static auto render_status_bar(Html& h) -> void {
-        h.raw("<footer class=\"status-bar\">\n"
-              "  <span class=\"status-item\"><span class=\"conn-dot\"></span> <span id=\"status-db\">Connected</span></span>\n"
-              "  <span class=\"status-sep\"></span>\n"
-              "  <span class=\"status-item\" id=\"status-info\"></span>\n"
-              "  <span class=\"status-spacer\"></span>\n"
-              "  <span class=\"status-item\"><a href=\"/connections\" style=\"color:inherit;text-decoration:none\">&#128268; Connections</a></span>\n"
-              "  <span class=\"status-item\"><kbd>Ctrl+B</kbd> Sidebar</span>\n"
-              "  <span class=\"status-item\"><kbd>Ctrl+K</kbd> Command Palette</span>\n"
-              "</footer>\n");
+        using namespace html;
+        {
+            auto footer = open<Footer>(h, {cls("status-bar")});
+            {
+                auto item = open<Span>(h, {cls("status-item")});
+                el<Span>(h, {cls("conn-dot")});
+                h.raw(" ");
+                el<Span>(h, {id("status-db")}, "Connected");
+            }
+            el<Span>(h, {cls("status-sep")});
+            el<Span>(h, {cls("status-item"), id("status-info")});
+            el<Span>(h, {cls("status-spacer")});
+            {
+                auto item = open<Span>(h, {cls("status-item")});
+                el_raw<A>(h, {href("/connections"), style("color:inherit;text-decoration:none")}, "&#128268; Connections");
+            }
+            {
+                auto item = open<Span>(h, {cls("status-item")});
+                el<Kbd>(h, {}, "Ctrl+B");
+                h.raw(" Sidebar");
+            }
+            {
+                auto item = open<Span>(h, {cls("status-item")});
+                el<Kbd>(h, {}, "Ctrl+K");
+                h.raw(" Command Palette");
+            }
+        }
     }
 };
 

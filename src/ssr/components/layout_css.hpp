@@ -31,7 +31,7 @@ struct LayoutCSS {
     align-items: center;
     padding: 0 var(--sp-4);
     gap: var(--sp-3);
-    z-index: 200;
+    z-index: var(--z-fixed);
     overflow: hidden;
     min-width: 0;
 }
@@ -111,11 +111,23 @@ struct LayoutCSS {
     display: flex;
     align-items: center;
     gap: var(--sp-2);
+    padding: var(--sp-1) var(--sp-3);
+    border-radius: var(--radius);
     font-size: var(--font-size-xs);
-    color: var(--text-3);
+    color: var(--text-2);
     font-family: var(--font-mono);
+    cursor: pointer;
+    transition: background var(--transition-fast);
+    text-decoration: none;
+    white-space: nowrap;
     -webkit-app-region: no-drag;
 }
+.toolbar-conn:hover {
+    background: var(--bg-3);
+    color: var(--text-0);
+    text-decoration: none;
+}
+.toolbar-conn .conn-label { font-weight: 600; }
 
 .conn-dot {
     width: 7px;
@@ -168,7 +180,7 @@ struct LayoutCSS {
     overflow: hidden;
     min-width: var(--sidebar-min);
     position: relative;
-    z-index: 100;
+    z-index: var(--z-sidebar);
 }
 
 .sidebar-header {
@@ -435,6 +447,8 @@ struct LayoutCSS {
     gap: var(--sp-2);
 }
 
+.tree-empty-text { color: var(--text-4); font-style: italic; }
+
 .tree-separator {
     height: 0;
     border-top: 1px solid var(--border-subtle);
@@ -451,7 +465,7 @@ struct LayoutCSS {
     width: 6px;
     height: 100%;
     cursor: col-resize;
-    z-index: 150;
+    z-index: var(--z-resize);
     transition: background var(--transition-fast), opacity var(--transition-fast);
 }
 .resize-handle:hover,
@@ -617,7 +631,7 @@ h4 {
     font-size: var(--font-size-xs);
     color: rgba(255, 255, 255, 0.8);
     gap: var(--sp-4);
-    z-index: 200;
+    z-index: var(--z-fixed);
 }
 
 .status-item {

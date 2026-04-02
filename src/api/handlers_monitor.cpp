@@ -19,12 +19,18 @@ auto MonitorPageHandler::handle(Request& req, AppContext& /*ctx*/) -> Response {
     auto h = Html::with_capacity(4096);
 
     // Health checks panel
-    h.raw("<div id=\"health-panel\" hx-get=\"/monitor/health\" hx-trigger=\"load, every 10s\" hx-swap=\"innerHTML\">"
-          "<div class=\"loading\">Checking health...</div></div>");
+    {
+        auto hp = html::open<html::Div>(h, {html::id("health-panel"),
+            html::hx_get("/monitor/health"), html::hx_trigger("load, every 10s"), html::hx_swap("innerHTML")});
+        ui::loading(h, "Checking health...");
+    }
 
     // Stats
-    h.raw("<div id=\"monitor-stats\" hx-get=\"/monitor/stats\" hx-trigger=\"load, every 3s\" hx-swap=\"innerHTML\">"
-          "<div class=\"loading\">Loading stats...</div></div>");
+    {
+        auto sp = html::open<html::Div>(h, {html::id("monitor-stats"),
+            html::hx_get("/monitor/stats"), html::hx_trigger("load, every 3s"), html::hx_swap("innerHTML")});
+        ui::loading(h, "Loading stats...");
+    }
 
     // Section tabs for different monitoring views
     SectionTabs::render({{
@@ -37,8 +43,11 @@ auto MonitorPageHandler::handle(Request& req, AppContext& /*ctx*/) -> Response {
         {"Bloat", "/monitor/bloat"},
     }}, "monitor-content", h);
 
-    h.raw("<div id=\"monitor-content\" hx-get=\"/monitor/activity\" hx-trigger=\"load\" hx-swap=\"innerHTML\">"
-          "<div class=\"loading\">Loading...</div></div>");
+    {
+        auto mc = html::open<html::Div>(h, {html::id("monitor-content"),
+            html::hx_get("/monitor/activity"), html::hx_trigger("load"), html::hx_swap("innerHTML")});
+        ui::loading(h);
+    }
 
     if (req.is_htmx()) return Response::html(std::move(h).finish());
     return Response::html(render_page("Monitor", "Monitor", [&](Html& ph) {
@@ -55,21 +64,21 @@ auto MonitorStatsHandler::handle(Request& /*req*/, AppContext& ctx) -> Response 
 
     auto& s = *stats;
     auto h = Html::with_capacity(2048);
-    h.raw("<div class=\"stat-grid\">");
-    StatCard::render({"Active", std::to_string(s.active_connections), ""}, h);
-    StatCard::render({"Idle", std::to_string(s.idle_connections)}, h);
-    StatCard::render({"Idle in Txn", std::to_string(s.idle_in_transaction),
-                       s.idle_in_transaction > 0 ? "warning" : ""}, h);
-    StatCard::render({"Waiting", std::to_string(s.waiting_connections),
-                       s.waiting_connections > 0 ? "warning" : ""}, h);
-    StatCard::render({"Cache Hit",
-        std::format("{:.1f}%", s.cache_hit_ratio * 100),
-        s.cache_hit_ratio < 0.90 ? "danger" : "success"}, h);
-    StatCard::render({"Max Connections", std::to_string(s.max_connections)}, h);
-    StatCard::render({"Commits", std::to_string(s.total_commits)}, h);
-    StatCard::render({"Rollbacks", std::to_string(s.total_rollbacks),
-                       s.total_rollbacks > 0 ? "warning" : ""}, h);
-    h.raw("</div>");
+    ui::stat_grid(h, [&](Html& h) {
+        StatCard::render({"Active", std::to_string(s.active_connections), ""}, h);
+        StatCard::render({"Idle", std::to_string(s.idle_connections)}, h);
+        StatCard::render({"Idle in Txn", std::to_string(s.idle_in_transaction),
+                           s.idle_in_transaction > 0 ? "warning" : ""}, h);
+        StatCard::render({"Waiting", std::to_string(s.waiting_connections),
+                           s.waiting_connections > 0 ? "warning" : ""}, h);
+        StatCard::render({"Cache Hit",
+            std::format("{:.1f}%", s.cache_hit_ratio * 100),
+            s.cache_hit_ratio < 0.90 ? "danger" : "success"}, h);
+        StatCard::render({"Max Connections", std::to_string(s.max_connections)}, h);
+        StatCard::render({"Commits", std::to_string(s.total_commits)}, h);
+        StatCard::render({"Rollbacks", std::to_string(s.total_rollbacks),
+                           s.total_rollbacks > 0 ? "warning" : ""}, h);
+    });
 
     return Response::html(std::move(h).finish());
 }
@@ -82,7 +91,9 @@ auto MonitorActivityHandler::handle(Request& /*req*/, AppContext& ctx) -> Respon
     if (!activity) return Response::html(render_to_string<Alert>({error_message(activity.error()), "error"}));
 
     if (activity->empty()) {
-        return Response::html(R"(<div class="empty-state">No active queries</div>)");
+        return Response::html(render_partial([](Html& h) {
+            ui::empty_state(h, "No active queries");
+        }));
     }
 
     auto h = Html::with_capacity(8192);
@@ -102,18 +113,18 @@ auto MonitorActivityHandler::handle(Request& /*req*/, AppContext& ctx) -> Respon
 
         std::string cancel_btn;
         if (a.state == "active") {
-            cancel_btn = std::format(
-                R"(<button class="btn btn-sm btn-danger" hx-post="/monitor/cancel/{}" hx-confirm="Cancel query on PID {}?">Cancel</button>)",
-                a.pid, a.pid
-            );
+            cancel_btn = markup::btn("Cancel")
+                .danger()
+                .hx_post("/monitor/cancel/" + std::to_string(a.pid))
+                .confirm("Cancel query on PID " + std::to_string(a.pid) + "?");
         }
 
         std::string terminate_btn;
         if (a.state == "active" || a.state == "idle in transaction") {
-            terminate_btn = std::format(
-                R"(<button class="btn btn-sm btn-danger" hx-post="/monitor/terminate/{}" hx-confirm="Force terminate PID {}?">Kill</button>)",
-                a.pid, a.pid
-            );
+            terminate_btn = markup::btn("Kill")
+                .danger()
+                .hx_post("/monitor/terminate/" + std::to_string(a.pid))
+                .confirm("Force terminate PID " + std::to_string(a.pid) + "?");
         }
 
         Table::row(h, {{
@@ -122,9 +133,9 @@ auto MonitorActivityHandler::handle(Request& /*req*/, AppContext& ctx) -> Respon
             escape(a.user),
             render_to_string<Badge>({a.state, state_variant}),
             escape(a.duration),
-            a.wait_event.empty() ? std::string("&mdash;")
+            a.wait_event.empty() ? markup::mdash()
                 : std::format("{}/{}", escape(a.wait_event_type), escape(a.wait_event)),
-            std::format(R"(<code class="query-preview">{}</code>)", query_preview),
+            markup::code_cls("query-preview", query_preview),
             cancel_btn,
             terminate_btn,
         }});
@@ -144,21 +155,21 @@ auto MonitorLocksHandler::handle(Request& req, AppContext& ctx) -> Response {
     auto h = Html::with_capacity(8192);
 
     if (locks->empty()) {
-        h.raw(R"(<div class="empty-state">No locks detected</div>)");
+        ui::empty_state(h, "No locks detected");
     } else {
         Table::begin(h, {{
             {"PID", "num"}, {"Database", ""}, {"Relation", ""},
             {"Mode", ""}, {"Granted", ""}, {"Query", "wide"}
         }});
         for (auto& l : *locks) {
+            auto query_text = l.query.size() > 100 ? l.query.substr(0, 100) + "..." : l.query;
             Table::row(h, {{
                 std::to_string(l.pid),
                 escape(l.database),
-                l.relation.empty() ? std::string("&mdash;") : escape(l.relation),
+                l.relation.empty() ? markup::mdash() : escape(l.relation),
                 render_to_string<Badge>({l.mode, l.granted ? "secondary" : "danger"}),
-                l.granted ? std::string("&#10003;") : render_to_string<Badge>({"WAITING", "danger"}),
-                std::format("<code class=\"query-preview\">{}</code>",
-                    escape(l.query.size() > 100 ? l.query.substr(0, 100) + "..." : l.query)),
+                l.granted ? std::string(icon::check) : render_to_string<Badge>({"WAITING", "danger"}),
+                markup::code_cls("query-preview", escape(query_text)),
             }});
         }
         Table::end(h);
@@ -197,11 +208,11 @@ auto HealthCheckHandler::handle(Request& /*req*/, AppContext& ctx) -> Response {
     if (!checks) return Response::html(render_to_string<Alert>({error_message(checks.error()), "error"}));
 
     auto h = Html::with_capacity(4096);
-    h.raw("<div class=\"health-grid\">");
-    for (auto& c : *checks) {
-        HealthCard::render({c.name, c.status, c.value, c.detail}, h);
-    }
-    h.raw("</div>");
+    ui::health_grid(h, [&](Html& h) {
+        for (auto& c : *checks) {
+            HealthCard::render({c.name, c.status, c.value, c.detail}, h);
+        }
+    });
     return Response::html(std::move(h).finish());
 }
 
@@ -215,7 +226,9 @@ auto SlowQueriesHandler::handle(Request& /*req*/, AppContext& ctx) -> Response {
     if (!queries) return Response::html(render_to_string<Alert>({error_message(queries.error()), "error"}));
 
     if (queries->empty()) {
-        return Response::html("<div class=\"empty-state\">No slow queries (>500ms) running</div>");
+        return Response::html(render_partial([](Html& h) {
+            ui::empty_state(h, "No slow queries (>500ms) running");
+        }));
     }
 
     auto h = Html::with_capacity(8192);
@@ -235,8 +248,11 @@ auto SlowQueriesHandler::handle(Request& /*req*/, AppContext& ctx) -> Response {
             escape(q.user),
             escape(q.duration),
             render_to_string<Badge>({q.state, q.state == "active" ? "primary" : "warning"}),
-            std::format("<code class=\"query-preview\">{}</code>", query_preview),
-            std::format("<button class=\"btn btn-sm btn-danger\" hx-post=\"/monitor/cancel/{}\" hx-confirm=\"Cancel query PID {}?\">Cancel</button>", q.pid, q.pid),
+            markup::code_cls("query-preview", query_preview),
+            markup::btn("Cancel")
+                .danger()
+                .hx_post("/monitor/cancel/" + std::to_string(q.pid))
+                .confirm("Cancel query PID " + std::to_string(q.pid) + "?"),
         }});
     }
     Table::end(h);
@@ -253,7 +269,9 @@ auto BlockingHandler::handle(Request& /*req*/, AppContext& ctx) -> Response {
     if (!chains) return Response::html(render_to_string<Alert>({error_message(chains.error()), "error"}));
 
     if (chains->empty()) {
-        return Response::html("<div class=\"empty-state\">No blocking detected</div>");
+        return Response::html(render_partial([](Html& h) {
+            ui::empty_state(h, "No blocking detected");
+        }));
     }
 
     auto h = Html::with_capacity(8192);
@@ -276,12 +294,15 @@ auto BlockingHandler::handle(Request& /*req*/, AppContext& ctx) -> Response {
             std::to_string(c.blocked_pid),
             escape(c.blocked_user),
             escape(c.blocked_duration),
-            std::format("<code class=\"query-preview\">{}</code>", bq),
-            std::format("<strong>{}</strong>", c.blocking_pid),
+            markup::code_cls("query-preview", bq),
+            markup::strong(std::to_string(c.blocking_pid)),
             escape(c.blocking_user),
             escape(c.blocking_duration),
-            std::format("<code class=\"query-preview\">{}</code>", bkq),
-            std::format("<button class=\"btn btn-sm btn-danger\" hx-post=\"/monitor/terminate/{}\" hx-confirm=\"Kill blocking PID {}?\">Kill</button>", c.blocking_pid, c.blocking_pid),
+            markup::code_cls("query-preview", bkq),
+            markup::btn("Kill")
+                .danger()
+                .hx_post("/monitor/terminate/" + std::to_string(c.blocking_pid))
+                .confirm("Kill blocking PID " + std::to_string(c.blocking_pid) + "?"),
         }});
     }
     Table::end(h);
@@ -298,19 +319,19 @@ auto WALStatsHandler::handle(Request& /*req*/, AppContext& ctx) -> Response {
     if (!w) return Response::html(render_to_string<Alert>({error_message(w.error()), "error"}));
 
     auto h = Html::with_capacity(2048);
-    h.raw("<div class=\"stat-grid\">");
-    StatCard::render({"WAL Level", w->wal_level}, h);
-    StatCard::render({"Current LSN", w->current_lsn, "accent"}, h);
-    StatCard::render({"Checkpoint Timeout", w->checkpoint_timeout}, h);
-    StatCard::render({"Checkpoints (timed)", std::to_string(w->checkpoints_timed)}, h);
-    StatCard::render({"Checkpoints (requested)", std::to_string(w->checkpoints_req),
-                       w->checkpoints_req > w->checkpoints_timed ? "warning" : ""}, h);
-    StatCard::render({"Write Time", std::format("{:.1f}ms", w->checkpoint_write_time)}, h);
-    StatCard::render({"Sync Time", std::format("{:.1f}ms", w->checkpoint_sync_time)}, h);
-    StatCard::render({"Buffers (checkpoint)", std::to_string(w->buffers_checkpoint)}, h);
-    StatCard::render({"Buffers (backend)", std::to_string(w->buffers_backend),
-                       w->buffers_backend > w->buffers_checkpoint ? "warning" : ""}, h);
-    h.raw("</div>");
+    ui::stat_grid(h, [&](Html& h) {
+        StatCard::render({"WAL Level", w->wal_level}, h);
+        StatCard::render({"Current LSN", w->current_lsn, "accent"}, h);
+        StatCard::render({"Checkpoint Timeout", w->checkpoint_timeout}, h);
+        StatCard::render({"Checkpoints (timed)", std::to_string(w->checkpoints_timed)}, h);
+        StatCard::render({"Checkpoints (requested)", std::to_string(w->checkpoints_req),
+                           w->checkpoints_req > w->checkpoints_timed ? "warning" : ""}, h);
+        StatCard::render({"Write Time", std::format("{:.1f}ms", w->checkpoint_write_time)}, h);
+        StatCard::render({"Sync Time", std::format("{:.1f}ms", w->checkpoint_sync_time)}, h);
+        StatCard::render({"Buffers (checkpoint)", std::to_string(w->buffers_checkpoint)}, h);
+        StatCard::render({"Buffers (backend)", std::to_string(w->buffers_backend),
+                           w->buffers_backend > w->buffers_checkpoint ? "warning" : ""}, h);
+    });
 
     return Response::html(std::move(h).finish());
 }
@@ -325,7 +346,9 @@ auto VacuumProgressHandler::handle(Request& /*req*/, AppContext& ctx) -> Respons
     if (!progress) return Response::html(render_to_string<Alert>({error_message(progress.error()), "error"}));
 
     if (progress->empty()) {
-        return Response::html("<div class=\"empty-state\">No vacuum operations in progress</div>");
+        return Response::html(render_partial([](Html& h) {
+            ui::empty_state(h, "No vacuum operations in progress");
+        }));
     }
 
     auto h = Html::with_capacity(4096);
@@ -384,7 +407,7 @@ auto DatabaseStatsHandler::handle(Request& /*req*/, AppContext& ctx) -> Response
         };
 
         Table::row(h, {{
-            std::format("<strong>{}</strong>", escape(d.name)),
+            markup::strong(d.name),
             escape(d.size),
             bar,
             std::to_string(d.connections),
@@ -412,7 +435,9 @@ auto BloatHandler::handle(Request& req, AppContext& ctx) -> Response {
     if (!bloat) return Response::html(render_to_string<Alert>({error_message(bloat.error()), "error"}));
 
     if (bloat->empty()) {
-        return Response::html("<div class=\"empty-state\">No tables found</div>");
+        return Response::html(render_partial([](Html& h) {
+            ui::empty_state(h, "No tables found");
+        }));
     }
 
     auto h = Html::with_capacity(8192);
@@ -426,7 +451,7 @@ auto BloatHandler::handle(Request& req, AppContext& ctx) -> Response {
         auto row_attrs = pct > 30 ? std::string_view(R"(class="row-warning")") : std::string_view("");
 
         Table::row(h, {{
-            std::format("<strong>{}</strong>", escape(b.table)),
+            markup::strong(b.table),
             escape(b.real_size_pretty),
             escape(b.bloat_size_pretty),
             render_to_string<ProgressBar>({pct, pct > 50 ? "danger" : pct > 20 ? "warning" : ""}) +

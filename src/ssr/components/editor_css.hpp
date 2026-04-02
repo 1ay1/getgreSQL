@@ -171,7 +171,7 @@ struct EditorCSS {
     display: flex;
     align-items: center;
     justify-content: center;
-    z-index: 100;
+    z-index: var(--z-dropdown);
     pointer-events: none;
 }
 
@@ -189,7 +189,7 @@ struct EditorCSS {
 
 .editor-table-preview {
     position: fixed;
-    z-index: 10002;
+    z-index: var(--z-top);
     background: var(--bg-2);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
@@ -473,7 +473,7 @@ struct EditorCSS {
     position: fixed;
     inset: 0;
     background: rgba(0, 0, 0, 0.5);
-    z-index: 1000;
+    z-index: var(--z-modal);
     display: flex;
     justify-content: center;
     padding-top: 15vh;
@@ -1189,7 +1189,7 @@ tbody tr {
 
 .ac-popup {
     position: fixed;
-    z-index: 10000;
+    z-index: var(--z-overlay);
     background: var(--bg-1);
     border: 1px solid var(--border);
     border-radius: var(--radius);

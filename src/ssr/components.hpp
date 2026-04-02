@@ -58,6 +58,7 @@
 
 // ─── Page Components ────────────────────────────────────────────────
 #include "ssr/components/admin_pages.hpp"
+#include "ssr/components/dashboard_widgets.hpp"
 #include "ssr/components/page_layout.hpp"
 #include "ssr/components/editor_css.hpp"
 #include "ssr/components/dashboard_css.hpp"

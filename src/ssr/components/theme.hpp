@@ -65,6 +65,12 @@ struct Theme {
     --radius: 4px;
     --radius-lg: 6px;
 
+    /* Semantic borders (for variant outlines — avoids hardcoded rgba) */
+    --accent-border: rgba(56, 139, 253, 0.2);
+    --success-border: rgba(63, 185, 80, 0.2);
+    --warning-border: rgba(210, 153, 34, 0.2);
+    --danger-border: rgba(248, 81, 73, 0.2);
+
     /* Shadows */
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
     --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.3);
@@ -74,6 +80,17 @@ struct Theme {
     /* Transitions */
     --transition-fast: 0.12s ease;
     --transition-normal: 0.2s ease;
+
+    /* Z-index scale */
+    --z-sticky: 10;
+    --z-dropdown: 100;
+    --z-sidebar: 100;
+    --z-resize: 150;
+    --z-fixed: 200;
+    --z-modal: 1000;
+    --z-overlay: 10000;
+    --z-popover: 10001;
+    --z-top: 10002;
 }
 
 /* Theme overrides are in src/ssr/components/themes/*.hpp */
@@ -84,7 +101,7 @@ struct Theme {
     position: fixed;
     inset: 0;
     background: rgba(0, 0, 0, 0.5);
-    z-index: 10000;
+    z-index: var(--z-overlay);
     display: flex;
     align-items: center;
     justify-content: center;

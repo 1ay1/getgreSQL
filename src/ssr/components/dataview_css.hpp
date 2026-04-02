@@ -447,7 +447,7 @@ tr.dv-row-selected td {
     transform: translateY(-4px);
     transition: opacity 0.15s, transform 0.15s;
     pointer-events: none;
-    z-index: 100;
+    z-index: var(--z-dropdown);
 }
 .dv-toast-show {
     opacity: 1;
@@ -459,7 +459,7 @@ tr.dv-row-selected td {
 
 .dv-col-stats-tip {
     position: fixed;
-    z-index: 10001;
+    z-index: var(--z-popover);
     background: var(--bg-2);
     border: 1px solid var(--border);
     border-radius: var(--radius);

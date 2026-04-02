@@ -10,13 +10,6 @@ namespace getgresql::api {
 
 using namespace ssr;
 
-// Helper: escape a string for use in table cells (returns std::string)
-static auto escape(std::string_view s) -> std::string {
-    auto h = Html::with_capacity(s.size() + 32);
-    h.text(s);
-    return std::move(h).finish();
-}
-
 // ─── RolesHandler ───────────────────────────────────────────────────
 
 auto RolesHandler::handle(Request& req, AppContext& ctx) -> Response {
@@ -42,23 +35,19 @@ auto RolesHandler::handle(Request& req, AppContext& ctx) -> Response {
     }});
 
     for (auto& r : *roles) {
-        auto bool_badge = [](bool val) -> std::string {
-            return val ? render_to_string<Badge>({"YES", "success"}) : render_to_string<Badge>({"NO", "secondary"});
-        };
-
         auto conn_limit = r.connection_limit < 0
             ? std::string("unlimited")
             : std::to_string(r.connection_limit);
 
         Table::row(h, {{
-            std::format("<strong>{}</strong>", escape(r.name)),
-            bool_badge(r.is_superuser),
-            bool_badge(r.can_login),
-            bool_badge(r.can_create_db),
-            bool_badge(r.can_create_role),
+            markup::strong(r.name),
+            markup::bool_yes_no(r.is_superuser),
+            markup::bool_yes_no(r.can_login),
+            markup::bool_yes_no(r.can_create_db),
+            markup::bool_yes_no(r.can_create_role),
             conn_limit,
-            r.valid_until.empty() ? std::string("&mdash;") : escape(r.valid_until),
-            r.member_of.empty() ? std::string("&mdash;") : escape(r.member_of),
+            r.valid_until.empty() ? markup::mdash() : markup::detail::esc(r.valid_until),
+            r.member_of.empty() ? markup::mdash() : markup::detail::esc(r.member_of),
         }});
     }
     Table::end(h);
@@ -93,10 +82,10 @@ auto ExtensionsHandler::handle(Request& req, AppContext& ctx) -> Response {
 
     for (auto& e : *exts) {
         Table::row(h, {{
-            std::format("<strong>{}</strong>", escape(e.name)),
+            markup::strong(e.name),
             render_to_string<Badge>({e.version, "secondary"}),
-            escape(e.schema),
-            escape(e.description),
+            markup::detail::esc(e.schema),
+            markup::detail::esc(e.description),
         }});
     }
     Table::end(h);
@@ -110,23 +99,27 @@ auto ExtensionsHandler::handle(Request& req, AppContext& ctx) -> Response {
 // ─── SettingsHandler ────────────────────────────────────────────────
 
 auto SettingsHandler::handle(Request& req, AppContext& /*ctx*/) -> Response {
+    using namespace html;
     auto h = Html::with_capacity(4096);
-    h.raw(R"(
-<div class="settings-toolbar">
-    <div class="search-box" style="flex:1">
-        <input type="search" name="q" placeholder="Search settings..."
-            hx-get="/settings/search" hx-trigger="input changed delay:300ms"
-            hx-target="#settings-results" class="search-input">
-    </div>
-    <button class="btn btn-sm btn-warning"
-        hx-post="/settings/reload" hx-target="#reload-status" hx-swap="innerHTML"
-        hx-confirm="Reload PostgreSQL configuration?">&#8635; Reload Config</button>
-    <span id="reload-status"></span>
-</div>
-<div id="settings-results" hx-get="/settings/search" hx-trigger="load">
-    <div class="loading">Loading settings...</div>
-</div>
-)");
+    {
+        auto toolbar = open<Div>(h, {cls("settings-toolbar")});
+        {
+            auto box = open<Div>(h, {cls("search-box"), style("flex:1")});
+            void_el<Input>(h, {type("search"), name("q"), placeholder("Search settings..."),
+                cls("search-input"), aria_label("Search settings"),
+                hx_get("/settings/search"), hx_trigger("input changed delay:300ms"),
+                hx_target("#settings-results")});
+        }
+        el_raw<Button>(h, {cls("btn btn-sm btn-warning"),
+            hx_post("/settings/reload"), hx_target("#reload-status"), hx_swap("innerHTML"),
+            hx_confirm("Reload PostgreSQL configuration?")}, "&#8635; Reload Config");
+        el<Span>(h, {id("reload-status")});
+    }
+    {
+        auto results = open<Div>(h, {id("settings-results"),
+            hx_get("/settings/search"), hx_trigger("load")});
+        ui::loading(h, "Loading settings...");
+    }
 
     if (req.is_htmx()) return Response::html(std::move(h).finish());
     return Response::html(render_page("Settings", "Dashboard", [&](Html& ph) {
@@ -145,7 +138,9 @@ auto SettingsSearchHandler::handle(Request& req, AppContext& ctx) -> Response {
     if (!settings) return Response::html(render_to_string<Alert>({error_message(settings.error()), "error"}));
 
     if (settings->empty()) {
-        return Response::html(R"(<div class="empty-state">No settings found</div>)");
+        return Response::html(render_partial([](Html& h) {
+            ui::empty_state(h, "No settings found");
+        }));
     }
 
     // Group by category
@@ -160,7 +155,7 @@ auto SettingsSearchHandler::handle(Request& req, AppContext& ctx) -> Response {
                 Table::end(h);
             }
             current_category = s.category;
-            h.raw("<h4>").text(current_category).raw("</h4>");
+            html::el<html::H4>(h, {}, current_category);
             Table::begin(h, {{
                 {"Name", ""}, {"Value", ""}, {"Source", ""}, {"Context", ""},
                 {"Description", "wide"}
@@ -175,15 +170,15 @@ auto SettingsSearchHandler::handle(Request& req, AppContext& ctx) -> Response {
             s.context == "user"       ? "success" : "secondary";
 
         auto value_str = s.unit.empty()
-            ? escape(s.setting)
-            : std::format("{} {}", escape(s.setting), escape(s.unit));
+            ? markup::code(s.setting)
+            : markup::code(std::string(s.setting) + " " + std::string(s.unit));
 
         Table::row(h, {{
-            std::format("<code>{}</code>", escape(s.name)),
-            std::format("<code>{}</code>", value_str),
-            escape(s.source),
+            markup::code(s.name),
+            value_str,
+            markup::detail::esc(s.source),
             render_to_string<Badge>({s.context, context_variant}),
-            escape(s.short_desc),
+            markup::detail::esc(s.short_desc),
         }});
     }
 
@@ -226,12 +221,13 @@ auto FunctionListHandler::handle(Request& req, AppContext& ctx) -> Response {
             f.language == "sql"     ? "success" :
             f.language == "c"       ? "danger"  : "secondary";
 
+        auto func_url = std::format("/db/{}/schema/{}/function/{}",
+            db_name, schema_name, f.name);
+
         Table::row(h, {{
-            std::format("<a href=\"/db/{}/schema/{}/function/{}\">{}</a>",
-                escape(db_name), escape(schema_name),
-                escape(f.name), escape(f.name)),
-            std::format("<code>{}</code>", escape(f.arguments)),
-            escape(f.return_type),
+            markup::spa_link(func_url, f.name),
+            markup::code(f.arguments),
+            markup::detail::esc(f.return_type),
             render_to_string<Badge>({f.language, lang_variant}),
             render_to_string<Badge>({f.volatility, "secondary"}),
         }});
@@ -268,14 +264,18 @@ auto FunctionDetailHandler::handle(Request& req, AppContext& ctx) -> Response {
     };
     Breadcrumbs::render(crumbs, h);
 
-    h.raw("<p><strong>Language:</strong> ").raw(render_to_string<Badge>({source->language, "primary"})).raw("</p>");
-
-    h.raw("<h3>Source</h3>");
-    h.raw("<div class=\"function-source\">").text(source->source).raw("</div>");
+    {
+        auto p = html::open<html::P>(h);
+        html::el<html::Strong>(h, {}, "Language:");
+        h.raw(" ");
+        Badge::render({source->language, "primary"}, h);
+    }
+    html::el<html::H3>(h, {}, "Source");
+    html::el<html::Div>(h, {html::cls("function-source")}, source->source);
 
     if (!source->definition.empty()) {
-        h.raw("<h3>Full Definition</h3>");
-        h.raw("<div class=\"function-source\">").text(source->definition).raw("</div>");
+        html::el<html::H3>(h, {}, "Full Definition");
+        html::el<html::Div>(h, {html::cls("function-source")}, source->definition);
     }
 
     auto title = std::format("Function: {}", func_name);
@@ -313,14 +313,14 @@ auto SequenceListHandler::handle(Request& req, AppContext& ctx) -> Response {
 
     for (auto& s : *seqs) {
         Table::row(h, {{
-            std::format("<strong>{}</strong>", escape(s.name)),
+            markup::strong(s.name),
             render_to_string<Badge>({s.data_type, "secondary"}),
             std::to_string(s.current_value),
             std::to_string(s.start_value),
             std::to_string(s.increment),
             std::to_string(s.min_value),
             std::to_string(s.max_value),
-            s.cycle ? render_to_string<Badge>({"YES", "success"}) : render_to_string<Badge>({"NO", "secondary"}),
+            markup::bool_yes_no(s.cycle),
         }});
     }
     Table::end(h);
@@ -364,13 +364,13 @@ auto IndexAnalysisHandler::handle(Request& req, AppContext& ctx) -> Response {
             : std::string_view("");
 
         auto name_cell = idx.idx_scan == 0
-            ? std::format("{} {}", escape(idx.index_name), render_to_string<Badge>({"UNUSED", "warning"}))
-            : escape(idx.index_name);
+            ? markup::detail::esc(idx.index_name) + " " + render_to_string<Badge>({"UNUSED", "warning"})
+            : markup::detail::esc(idx.index_name);
 
         Table::row(h, {{
             name_cell,
-            escape(idx.table),
-            escape(idx.index_size),
+            markup::detail::esc(idx.table),
+            markup::detail::esc(idx.index_size),
             std::to_string(idx.idx_scan),
             std::to_string(idx.idx_tup_read),
             std::to_string(idx.idx_tup_fetch),
@@ -421,12 +421,12 @@ auto DatabaseSizeHandler::handle(Request& req, AppContext& ctx) -> Response {
         return std::format("{} B", bytes);
     };
 
-    h.raw("<div class=\"stat-grid\">");
-    StatCard::render({"Total Size", format_size(total_bytes)}, h);
-    StatCard::render({"Tables", std::to_string(total_tables)}, h);
-    StatCard::render({"Indexes", std::to_string(total_indexes)}, h);
-    StatCard::render({"Schemas", std::to_string(breakdown->size())}, h);
-    h.raw("</div>");
+    ui::stat_grid(h, [&](Html& h) {
+        StatCard::render({"Total Size", format_size(total_bytes)}, h);
+        StatCard::render({"Tables", std::to_string(total_tables)}, h);
+        StatCard::render({"Indexes", std::to_string(total_indexes)}, h);
+        StatCard::render({"Schemas", std::to_string(breakdown->size())}, h);
+    });
 
     Table::begin(h, {{
         {"Schema", "", true}, {"Size", "num", true}, {"Tables", "num", true}, {"Indexes", "num", true}
@@ -434,8 +434,8 @@ auto DatabaseSizeHandler::handle(Request& req, AppContext& ctx) -> Response {
 
     for (auto& s : *breakdown) {
         Table::row(h, {{
-            escape(s.schema),
-            escape(s.size),
+            markup::detail::esc(s.schema),
+            markup::detail::esc(s.size),
             std::to_string(s.table_count),
             std::to_string(s.index_count),
         }});
@@ -469,7 +469,7 @@ auto ReplicationHandler::handle(Request& req, AppContext& ctx) -> Response {
     auto h = Html::with_capacity(8192);
 
     if (slots->empty()) {
-        h.raw(R"(<div class="empty-state">No replication slots configured</div>)");
+        ui::empty_state(h, "No replication slots configured");
     } else {
         Table::begin(h, {{
             {"Slot Name", "", true}, {"Type", ""}, {"Database", "", true}, {"Active", ""},
@@ -478,12 +478,12 @@ auto ReplicationHandler::handle(Request& req, AppContext& ctx) -> Response {
 
         for (auto& s : *slots) {
             Table::row(h, {{
-                std::format("<strong>{}</strong>", escape(s.slot_name)),
+                markup::strong(s.slot_name),
                 render_to_string<Badge>({s.slot_type, "secondary"}),
-                escape(s.database),
+                markup::detail::esc(s.database),
                 s.active ? render_to_string<Badge>({"YES", "success"}) : render_to_string<Badge>({"NO", "danger"}),
-                s.restart_lsn.empty() ? std::string("&mdash;") : std::format("<code>{}</code>", escape(s.restart_lsn)),
-                s.confirmed_flush_lsn.empty() ? std::string("&mdash;") : std::format("<code>{}</code>", escape(s.confirmed_flush_lsn)),
+                s.restart_lsn.empty() ? markup::mdash() : markup::code(s.restart_lsn),
+                s.confirmed_flush_lsn.empty() ? markup::mdash() : markup::code(s.confirmed_flush_lsn),
             }});
         }
         Table::end(h);
@@ -498,18 +498,20 @@ auto ReplicationHandler::handle(Request& req, AppContext& ctx) -> Response {
 // ─── TableStatsHandler ──────────────────────────────────────────────
 
 auto TableStatsHandler::handle(Request& req, AppContext& /*ctx*/) -> Response {
+    using namespace html;
     auto h = Html::with_capacity(4096);
-    h.raw(R"(
-<div class="schema-selector">
-    <label for="schema-select">Schema:</label>
-    <input type="text" id="schema-select" name="schema" value="public"
-        hx-get="/monitor/tablestats/data" hx-trigger="change, load"
-        hx-target="#tablestats-results" hx-include="this">
-</div>
-<div id="tablestats-results" hx-get="/monitor/tablestats/data?schema=public" hx-trigger="load">
-    <div class="loading">Loading table statistics...</div>
-</div>
-)");
+    {
+        auto selector = open<Div>(h, {cls("schema-selector")});
+        el<Label>(h, {for_("schema-select")}, "Schema:");
+        void_el<Input>(h, {type("text"), id("schema-select"), name("schema"), value("public"),
+            hx_get("/monitor/tablestats/data"), hx_trigger("change, load"),
+            hx_target("#tablestats-results"), hx_include("this")});
+    }
+    {
+        auto results = open<Div>(h, {id("tablestats-results"),
+            hx_get("/monitor/tablestats/data?schema=public"), hx_trigger("load")});
+        ui::loading(h, "Loading table statistics...");
+    }
 
     if (req.is_htmx()) return Response::html(std::move(h).finish());
     return Response::html(render_page("Table Statistics", "Monitor", [&](Html& ph) {
@@ -530,7 +532,9 @@ auto TableStatsDataHandler::handle(Request& req, AppContext& ctx) -> Response {
     if (!stats) return Response::html(render_to_string<Alert>({error_message(stats.error()), "error"}));
 
     if (stats->empty()) {
-        return Response::html(R"(<div class="empty-state">No tables found in this schema</div>)");
+        return Response::html(render_partial([](Html& h) {
+            ui::empty_state(h, "No tables found in this schema");
+        }));
     }
 
     auto h = Html::with_capacity(16384);
@@ -545,7 +549,7 @@ auto TableStatsDataHandler::handle(Request& req, AppContext& ctx) -> Response {
         bool high_dead = t.n_live_tup > 0 && t.n_dead_tup > static_cast<long long>(static_cast<double>(t.n_live_tup) * 0.1);
 
         auto dead_cell = high_dead
-            ? std::format("{} {}", std::to_string(t.n_dead_tup), render_to_string<Badge>({"HIGH", "warning"}))
+            ? std::to_string(t.n_dead_tup) + " " + render_to_string<Badge>({"HIGH", "warning"})
             : std::to_string(t.n_dead_tup);
 
         auto row_attrs = high_dead
@@ -553,11 +557,11 @@ auto TableStatsDataHandler::handle(Request& req, AppContext& ctx) -> Response {
             : std::string_view("");
 
         auto last_vacuum = t.last_vacuum.empty()
-            ? (t.last_autovacuum.empty() ? std::string("&mdash;") : escape(t.last_autovacuum))
-            : escape(t.last_vacuum);
+            ? (t.last_autovacuum.empty() ? markup::mdash() : markup::detail::esc(t.last_autovacuum))
+            : markup::detail::esc(t.last_vacuum);
 
         Table::row(h, {{
-            std::format("<strong>{}</strong>", escape(t.table)),
+            markup::strong(t.table),
             std::to_string(t.seq_scan),
             std::to_string(t.idx_scan),
             std::to_string(t.n_tup_ins),
@@ -566,7 +570,7 @@ auto TableStatsDataHandler::handle(Request& req, AppContext& ctx) -> Response {
             std::to_string(t.n_live_tup),
             dead_cell,
             last_vacuum,
-            t.last_analyze.empty() ? std::string("&mdash;") : escape(t.last_analyze),
+            t.last_analyze.empty() ? markup::mdash() : markup::detail::esc(t.last_analyze),
         }}, row_attrs);
     }
     Table::end(h);
@@ -676,8 +680,11 @@ auto UnusedIndexDropHandler::handle(Request& req, AppContext& ctx) -> Response {
     auto sql = "DROP INDEX CONCURRENTLY \"" + schema + "\".\"" + index + "\"";
     auto result = conn->get().exec(sql);
     if (!result) {
-        return Response::html("<tr><td colspan=\"6\">" +
-            render_to_string<Alert>({error_message(result.error()), "error"}) + "</td></tr>");
+        return Response::html(render_partial([&](Html& h) {
+            auto tr = html::open<html::Tr>(h);
+            html::el_raw<html::Td>(h, {html::attr("colspan", "6")},
+                render_to_string<Alert>({error_message(result.error()), "error"}));
+        }));
     }
 
     // Return empty (row disappears via outerHTML swap)

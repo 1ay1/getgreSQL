@@ -135,38 +135,7 @@ select.form-input {
     flex-wrap: wrap;
 }
 
-/* ─── Toolbar connection indicator ────────────────────────────────── */
-
-.toolbar-conn {
-    display: flex;
-    align-items: center;
-    gap: var(--sp-2);
-    padding: 2px var(--sp-3);
-    border-radius: var(--radius);
-    font-size: var(--font-size-xs);
-    color: var(--text-2);
-    cursor: pointer;
-    transition: background var(--transition-fast);
-    text-decoration: none;
-    white-space: nowrap;
-}
-
-.toolbar-conn:hover {
-    background: var(--bg-3);
-    color: var(--text-0);
-}
-
-.toolbar-conn .conn-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: var(--success);
-    flex-shrink: 0;
-}
-
-.toolbar-conn .conn-label {
-    font-weight: 600;
-}
+/* toolbar-conn styles are in layout_css.hpp */
 )_CSS_"; }
 };
 

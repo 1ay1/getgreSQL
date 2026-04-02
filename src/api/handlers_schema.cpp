@@ -83,66 +83,7 @@ auto PgTypesHandler::handle(Request& /*req*/, AppContext& ctx) -> Response {
 
 // ─── CREATE TABLE ───────────────────────────────────────────────────
 
-auto CreateTablePageHandler::handle(Request& req, AppContext& /*ctx*/) -> Response {
-    auto db = req.param("db"); auto sc = req.param("schema");
-
-    auto render = [&](Html& h) {
-        Breadcrumbs::render(std::vector<Crumb>{{"Databases","/databases"},
-            {std::string(db),std::format("/db/{}/schemas",db)},
-            {std::string(sc),std::format("/db/{}/schema/{}/tables",db,sc)},
-            {"Create Table",""}}, h);
-
-        h.raw("<form id=\"create-table-form\" hx-post=\"/db/").raw(db).raw("/schema/").raw(sc)
-         .raw("/create-table/exec\" hx-target=\"#create-result\" hx-swap=\"innerHTML\">");
-
-        // Table name
-        h.raw("<div style=\"margin-bottom:var(--sp-4)\">"
-              "<label style=\"font-weight:600;display:block;margin-bottom:var(--sp-2)\">Table Name</label>"
-              "<input type=\"text\" name=\"table_name\" required class=\"insert-input\" style=\"max-width:300px\" placeholder=\"my_table\">"
-              "</div>");
-
-        // Column definitions
-        h.raw("<h3>Columns</h3>"
-              "<div id=\"col-defs\">"
-              "<div class=\"col-def-row\" style=\"display:grid;grid-template-columns:200px 150px 60px 200px 40px 40px;gap:var(--sp-2);align-items:center;margin-bottom:var(--sp-2)\">"
-              "<strong style=\"font-size:var(--font-size-xs);color:var(--text-3)\">Name</strong>"
-              "<strong style=\"font-size:var(--font-size-xs);color:var(--text-3)\">Type</strong>"
-              "<strong style=\"font-size:var(--font-size-xs);color:var(--text-3)\">PK</strong>"
-              "<strong style=\"font-size:var(--font-size-xs);color:var(--text-3)\">Default</strong>"
-              "<strong style=\"font-size:var(--font-size-xs);color:var(--text-3)\">NN</strong>"
-              "<span></span></div>");
-
-        // Initial 3 column rows
-        for (int i = 0; i < 3; ++i) {
-            h.raw(std::format(
-                "<div class=\"col-def-row\" style=\"display:grid;grid-template-columns:200px 150px 60px 200px 40px 40px;gap:var(--sp-2);align-items:center;margin-bottom:var(--sp-2)\">"
-                "<input type=\"text\" name=\"col_name_{}\" class=\"insert-input\" placeholder=\"column_name\">"
-                "<input type=\"text\" name=\"col_type_{}\" class=\"insert-input\" placeholder=\"text\" list=\"pg-types\">"
-                "<input type=\"checkbox\" name=\"col_pk_{}\" value=\"1\">"
-                "<input type=\"text\" name=\"col_default_{}\" class=\"insert-input\" placeholder=\"\">"
-                "<input type=\"checkbox\" name=\"col_notnull_{}\" value=\"1\" checked>"
-                "<button type=\"button\" class=\"btn btn-sm btn-ghost\" onclick=\"this.closest('.col-def-row').remove()\">&times;</button>"
-                "</div>", i, i, i, i, i));
-        }
-        h.raw("</div>");
-
-        // Add column button
-        h.raw("<button type=\"button\" class=\"btn btn-sm\" onclick=\"addColumnDef()\" style=\"margin:var(--sp-2) 0 var(--sp-4)\">+ Add Column</button>");
-
-        // PG types datalist (populated via JS)
-        h.raw("<datalist id=\"pg-types\"></datalist>");
-
-        // Preview + Create buttons
-        h.raw("<div class=\"btn-group\" style=\"margin-top:var(--sp-4)\">"
-              "<button type=\"submit\" class=\"btn btn-primary\">Create Table</button>"
-              "<button type=\"button\" class=\"btn\" onclick=\"previewCreateDDL()\">Preview DDL</button>"
-              "</div>");
-
-        h.raw("</form>");
-        h.raw("<div id=\"create-result\" style=\"margin-top:var(--sp-4)\"></div>");
-
-        // JS for dynamic columns + type autocomplete
-        h.raw(R"JS(<script>
+static constexpr std::string_view create_table_js = R"JS(
 var colIdx = 3;
 function addColumnDef() {
     var row = document.createElement('div');
@@ -168,7 +109,75 @@ fetch('/api/pg-types').then(function(r){return r.json()}).then(function(types){
     var dl=document.getElementById('pg-types');
     types.forEach(function(t){var o=document.createElement('option');o.value=t;dl.appendChild(o);});
 });
-</script>)JS");
+)JS";
+
+auto CreateTablePageHandler::handle(Request& req, AppContext& /*ctx*/) -> Response {
+    auto db = req.param("db"); auto sc = req.param("schema");
+
+    auto render = [&](Html& h) {
+        Breadcrumbs::render(std::vector<Crumb>{{"Databases","/databases"},
+            {std::string(db),std::format("/db/{}/schemas",db)},
+            {std::string(sc),std::format("/db/{}/schema/{}/tables",db,sc)},
+            {"Create Table",""}}, h);
+
+        using namespace html;
+        auto form_url = "/db/" + std::string(db) + "/schema/" + std::string(sc) + "/create-table/exec";
+        {
+            auto form = open<Form>(h, {id("create-table-form"),
+                hx_post(form_url), hx_target("#create-result"), hx_swap("innerHTML")});
+
+            // Table name
+            {
+                auto field = open<Div>(h, {style("margin-bottom:var(--sp-4)")});
+                el<Label>(h, {style("font-weight:600;display:block;margin-bottom:var(--sp-2)")}, "Table Name");
+                void_el<Input>(h, {type("text"), name("table_name"), required(),
+                    cls("insert-input"), style("max-width:300px"), placeholder("my_table")});
+            }
+
+            // Column definitions
+            el<H3>(h, {}, "Columns");
+            auto col_grid_style = "display:grid;grid-template-columns:200px 150px 60px 200px 40px 40px;gap:var(--sp-2);align-items:center;margin-bottom:var(--sp-2)";
+            {
+                auto defs = open<Div>(h, {id("col-defs")});
+                // Header row
+                {
+                    auto hdr = open<Div>(h, {cls("col-def-row"), style(col_grid_style)});
+                    auto lbl_style = "font-size:var(--font-size-xs);color:var(--text-3)";
+                    for (auto lbl : {"Name", "Type", "PK", "Default", "NN"})
+                        html::el<html::Strong>(h, {style(lbl_style)}, lbl);
+                    html::el<html::Span>(h);
+                }
+                // Initial 3 column rows
+                for (int i = 0; i < 3; ++i) {
+                    auto is = std::to_string(i);
+                    auto def_row = open<Div>(h, {cls("col-def-row"), style(col_grid_style)});
+                    void_el<Input>(h, {type("text"), name("col_name_" + is), cls("insert-input"), placeholder("column_name")});
+                    void_el<Input>(h, {type("text"), name("col_type_" + is), cls("insert-input"), placeholder("text"), list("pg-types")});
+                    void_el<Input>(h, {type("checkbox"), name("col_pk_" + is), value("1")});
+                    void_el<Input>(h, {type("text"), name("col_default_" + is), cls("insert-input"), placeholder("")});
+                    void_el<Input>(h, {type("checkbox"), name("col_notnull_" + is), value("1"), checked()});
+                    el_raw<Button>(h, {type("button"), cls("btn btn-sm btn-ghost"),
+                        js::on_click(js::raw_js("this.closest('.col-def-row').remove()"))}, "&times;");
+                }
+            }
+
+            el<Button>(h, {type("button"), cls("btn btn-sm"),
+                js::on_click(js::call("addColumnDef")),
+                style("margin:var(--sp-2) 0 var(--sp-4)")}, "+ Add Column");
+
+            el<Datalist>(h, {id("pg-types")});
+
+            {
+                auto btns = open<Div>(h, {cls("btn-group"), style("margin-top:var(--sp-4)")});
+                el<Button>(h, {type("submit"), cls("btn btn-primary")}, "Create Table");
+                el<Button>(h, {type("button"), cls("btn"),
+                    js::on_click(js::call("previewCreateDDL"))}, "Preview DDL");
+            }
+        }
+        el<Div>(h, {id("create-result"), style("margin-top:var(--sp-4)")});
+
+        // JS for dynamic columns + type autocomplete
+        el_raw<Script>(h, {}, create_table_js);
     };
 
     if (req.is_htmx()) return Response::html(render_partial(render));
@@ -218,7 +227,7 @@ auto CreateTableExecHandler::handle(Request& req, AppContext& ctx) -> Response {
 
     if (preview) {
         auto h = Html::with_capacity(ddl.size() + 128);
-        h.raw("<pre class=\"function-source\">").text(ddl).raw("</pre>");
+        html::el<html::Pre>(h, {html::cls("function-source")}, ddl);
         return Response::html(std::move(h).finish());
     }
 
@@ -229,14 +238,14 @@ auto CreateTableExecHandler::handle(Request& req, AppContext& ctx) -> Response {
     auto result = conn->get().exec(ddl);
     if (!result) {
         auto h = Html::with_capacity(1024);
-        h.raw("<div class=\"query-error\"><strong>Error:</strong> ").text(error_message(result.error())).raw("</div>");
-        h.raw("<pre class=\"function-source\" style=\"margin-top:var(--sp-3)\">").text(ddl).raw("</pre>");
+        Alert::render({error_message(result.error()), "error"}, h);
+        html::el<html::Pre>(h, {html::cls("function-source"), html::style("margin-top:var(--sp-3)")}, ddl);
         return Response::html(std::move(h).finish());
     }
 
     auto h = Html::with_capacity(512);
     Alert::render({"Table created successfully", "info"}, h);
-    h.raw("<script>setTimeout(function(){window.spaNavigate('/db/").raw(db).raw("/schema/").raw(sc).raw("/table/").raw(escape(table_name)).raw("')},500)</script>");
+    html::el<html::Script>(h, {}, "setTimeout(function(){window.spaNavigate('/db/" + std::string(db) + "/schema/" + std::string(sc) + "/table/" + escape(table_name) + "')},500)");
     return Response::html(std::move(h).finish());
 }
 
@@ -259,66 +268,89 @@ auto AlterTablePageHandler::handle(Request& req, AppContext& ctx) -> Response {
 
         auto base = std::format("/db/{}/schema/{}/table/{}", db, sc, tb);
 
+        using namespace html;
         // Rename table
-        h.raw("<h3>Rename Table</h3>");
-        h.raw("<form hx-post=\"").raw(base).raw("/rename\" hx-target=\"#alter-result\" hx-swap=\"innerHTML\" style=\"display:flex;gap:var(--sp-2);align-items:center;margin-bottom:var(--sp-4)\">");
-        h.raw("<input type=\"text\" name=\"new_name\" class=\"insert-input\" style=\"max-width:200px\" placeholder=\"new_name\" value=\"").text(tb).raw("\">");
-        h.raw("<button type=\"submit\" class=\"btn btn-sm\">Rename</button></form>");
+        el<H3>(h, {}, "Rename Table");
+        {
+            auto form = open<Form>(h, {hx_post(base + "/rename"), hx_target("#alter-result"), hx_swap("innerHTML"),
+                style("display:flex;gap:var(--sp-2);align-items:center;margin-bottom:var(--sp-4)")});
+            void_el<Input>(h, {type("text"), name("new_name"), cls("insert-input"),
+                style("max-width:200px"), placeholder("new_name"), value(tb)});
+            el<Button>(h, {type("submit"), cls("btn btn-sm")}, "Rename");
+        }
 
-        // Existing columns with drop buttons
         if (cols) {
-            h.raw("<h3>Columns</h3>");
+            el<H3>(h, {}, "Columns");
             Table::begin(h, {{"#","num"},{"Name",""},{"Type",""},{"Nullable",""},{"Default",""},{""}});
             for (auto& c : *cols) {
                 Table::row(h, {{
                     std::to_string(c.ordinal),
-                    std::format("<code>{}</code>", escape(c.name)),
+                    markup::code(c.name),
                     escape(c.type),
                     c.nullable ? std::string("YES") : std::string("NO"),
-                    c.default_value.empty() ? std::string("&mdash;") : escape(c.default_value),
-                    std::format("<button class=\"btn btn-sm btn-danger\" hx-post=\"{}/drop-column\" hx-vals='{{\"col\":\"{}\"}}' hx-target=\"#alter-result\" hx-swap=\"innerHTML\" hx-confirm=\"Drop column {}?\">Drop</button>",
-                        base, c.name, c.name)
+                    c.default_value.empty() ? markup::mdash() : escape(c.default_value),
+                    markup::btn("Drop").danger()
+                        .hx_post(base + "/drop-column")
+                        .vals(std::format("{{\"col\":\"{}\"}}", c.name))
+                        .target("#alter-result").swap("innerHTML")
+                        .confirm(std::format("Drop column {}?", c.name))
                 }});
             }
             Table::end(h);
         }
 
         // Add column form
-        h.raw("<h3>Add Column</h3>");
-        h.raw("<form hx-post=\"").raw(base).raw("/add-column\" hx-target=\"#alter-result\" hx-swap=\"innerHTML\" style=\"display:flex;gap:var(--sp-2);align-items:center;flex-wrap:wrap;margin-bottom:var(--sp-4)\">");
-        h.raw("<input type=\"text\" name=\"col_name\" class=\"insert-input\" style=\"width:150px\" placeholder=\"column_name\" required>");
-        h.raw("<input type=\"text\" name=\"col_type\" class=\"insert-input\" style=\"width:120px\" placeholder=\"text\" list=\"pg-types\">");
-        h.raw("<label style=\"font-size:var(--font-size-xs);display:flex;gap:4px;align-items:center\"><input type=\"checkbox\" name=\"not_null\" value=\"1\"> NOT NULL</label>");
-        h.raw("<input type=\"text\" name=\"default_val\" class=\"insert-input\" style=\"width:150px\" placeholder=\"default value\">");
-        h.raw("<button type=\"submit\" class=\"btn btn-sm btn-primary\">Add Column</button></form>");
-        h.raw("<datalist id=\"pg-types\"></datalist>");
-        h.raw("<script>fetch('/api/pg-types').then(r=>r.json()).then(t=>{var dl=document.getElementById('pg-types');t.forEach(x=>{var o=document.createElement('option');o.value=x;dl.appendChild(o);})});</script>");
+        el<H3>(h, {}, "Add Column");
+        {
+            auto form = open<Form>(h, {hx_post(base + "/add-column"), hx_target("#alter-result"), hx_swap("innerHTML"),
+                style("display:flex;gap:var(--sp-2);align-items:center;flex-wrap:wrap;margin-bottom:var(--sp-4)")});
+            void_el<Input>(h, {type("text"), name("col_name"), cls("insert-input"), style("width:150px"), placeholder("column_name"), required()});
+            void_el<Input>(h, {type("text"), name("col_type"), cls("insert-input"), style("width:120px"), placeholder("text"), list("pg-types")});
+            {
+                auto lbl = open<Label>(h, {style("font-size:var(--font-size-xs);display:flex;gap:4px;align-items:center")});
+                void_el<Input>(h, {type("checkbox"), name("not_null"), value("1")});
+                h.raw(" NOT NULL");
+            }
+            void_el<Input>(h, {type("text"), name("default_val"), cls("insert-input"), style("width:150px"), placeholder("default value")});
+            el<Button>(h, {type("submit"), cls("btn btn-sm btn-primary")}, "Add Column");
+        }
+        el<Datalist>(h, {id("pg-types")});
+        el<Script>(h, {}, "fetch('/api/pg-types').then(r=>r.json()).then(t=>{var dl=document.getElementById('pg-types');t.forEach(x=>{var o=document.createElement('option');o.value=x;dl.appendChild(o);})});");
 
-        // Indexes with drop buttons
         if (idxs && !idxs->empty()) {
-            h.raw("<h3>Indexes</h3>");
+            el<H3>(h, {}, "Indexes");
             Table::begin(h, {{"Name",""},{"Definition",""},{"Unique",""},{""}});
             for (auto& i : *idxs) {
                 Table::row(h, {{
                     escape(i.name),
-                    std::format("<code>{}</code>", escape(i.definition)),
+                    markup::code(i.definition),
                     i.is_unique ? std::string("Yes") : std::string("No"),
-                    i.is_primary ? std::string("") : std::format(
-                        "<button class=\"btn btn-sm btn-danger\" hx-post=\"{}/drop-index\" hx-vals='{{\"idx\":\"{}\"}}' hx-target=\"#alter-result\" hx-swap=\"innerHTML\" hx-confirm=\"Drop index {}?\">Drop</button>",
-                        base, i.name, i.name)
+                    i.is_primary ? markup::empty() :
+                        markup::btn("Drop").danger()
+                            .hx_post(base + "/drop-index")
+                            .vals(std::format("{{\"idx\":\"{}\"}}", i.name))
+                            .target("#alter-result").swap("innerHTML")
+                            .confirm(std::format("Drop index {}?", i.name))
                 }});
             }
             Table::end(h);
         }
 
         // Add index form
-        h.raw("<h3>Add Index</h3>");
-        h.raw("<form hx-post=\"").raw(base).raw("/add-index\" hx-target=\"#alter-result\" hx-swap=\"innerHTML\" style=\"display:flex;gap:var(--sp-2);align-items:center;flex-wrap:wrap;margin-bottom:var(--sp-4)\">");
-        h.raw("<input type=\"text\" name=\"idx_columns\" class=\"insert-input\" style=\"width:200px\" placeholder=\"col1, col2\" required>");
-        h.raw("<label style=\"font-size:var(--font-size-xs);display:flex;gap:4px;align-items:center\"><input type=\"checkbox\" name=\"unique\" value=\"1\"> UNIQUE</label>");
-        h.raw("<button type=\"submit\" class=\"btn btn-sm btn-primary\">Create Index</button></form>");
+        el<H3>(h, {}, "Add Index");
+        {
+            auto form = open<Form>(h, {hx_post(base + "/add-index"), hx_target("#alter-result"), hx_swap("innerHTML"),
+                style("display:flex;gap:var(--sp-2);align-items:center;flex-wrap:wrap;margin-bottom:var(--sp-4)")});
+            void_el<Input>(h, {type("text"), name("idx_columns"), cls("insert-input"), style("width:200px"), placeholder("col1, col2"), required()});
+            {
+                auto lbl = open<Label>(h, {style("font-size:var(--font-size-xs);display:flex;gap:4px;align-items:center")});
+                void_el<Input>(h, {type("checkbox"), name("unique"), value("1")});
+                h.raw(" UNIQUE");
+            }
+            el<Button>(h, {type("submit"), cls("btn btn-sm btn-primary")}, "Create Index");
+        }
 
-        h.raw("<div id=\"alter-result\" style=\"margin-top:var(--sp-4)\"></div>");
+        el<Div>(h, {id("alter-result"), style("margin-top:var(--sp-4)")});
     };
 
     if (req.is_htmx()) return Response::html(render_partial(render));
@@ -433,7 +465,7 @@ auto DropTableHandler::handle(Request& req, AppContext& ctx) -> Response {
 
     auto h = Html::with_capacity(256);
     Alert::render({"Table dropped", "info"}, h);
-    h.raw("<script>setTimeout(function(){window.spaNavigate('/db/").raw(db).raw("/schema/").raw(sc).raw("/tables')},500)</script>");
+    html::el<html::Script>(h, {}, "setTimeout(function(){window.spaNavigate('/db/" + std::string(db) + "/schema/" + std::string(sc) + "/tables')},500)");
     return Response::html(std::move(h).finish());
 }
 
@@ -449,30 +481,47 @@ auto ImportPageHandler::handle(Request& req, AppContext& /*ctx*/) -> Response {
             {std::string(tb),std::format("/db/{}/schema/{}/table/{}",db,sc,tb)},
             {"Import",""}}, h);
 
-        h.raw("<div style=\"max-width:600px\">");
-        h.raw("<h3>Import Data</h3>");
-        h.raw("<p style=\"color:var(--text-3);font-size:var(--font-size-sm);margin-bottom:var(--sp-4)\">Paste CSV or JSON data below to import into <code>").text(sc).raw(".").text(tb).raw("</code></p>");
-
-        h.raw("<form hx-post=\"/db/").raw(db).raw("/schema/").raw(sc).raw("/table/").raw(tb)
-         .raw("/import/exec\" hx-target=\"#import-result\" hx-swap=\"innerHTML\">");
-        h.raw("<div style=\"margin-bottom:var(--sp-3)\">"
-              "<label style=\"font-weight:600;display:block;margin-bottom:var(--sp-2)\">Format</label>"
-              "<select name=\"format\" class=\"settings-select\">"
-              "<option value=\"csv\">CSV</option>"
-              "<option value=\"json\">JSON</option>"
-              "<option value=\"sql\">SQL (INSERT statements)</option>"
-              "</select></div>");
-        h.raw("<div style=\"margin-bottom:var(--sp-3)\">"
-              "<label style=\"font-weight:600;display:block;margin-bottom:var(--sp-2)\">Data</label>"
-              "<textarea name=\"data\" class=\"cell-modal-textarea\" style=\"min-height:200px;width:100%;border:1px solid var(--border);border-radius:var(--radius)\" "
-              "placeholder=\"Paste CSV, JSON array, or SQL INSERT statements here...\"></textarea></div>");
-        h.raw("<div style=\"margin-bottom:var(--sp-3)\">"
-              "<label style=\"font-size:var(--font-size-xs);display:flex;gap:4px;align-items:center\">"
-              "<input type=\"checkbox\" name=\"has_header\" value=\"1\" checked> CSV has header row</label></div>");
-        h.raw("<button type=\"submit\" class=\"btn btn-primary\">Import</button>");
-        h.raw("</form>");
-        h.raw("<div id=\"import-result\" style=\"margin-top:var(--sp-4)\"></div>");
-        h.raw("</div>");
+        using namespace html;
+        {
+            auto wrap = open<Div>(h, {style("max-width:600px")});
+            el<H3>(h, {}, "Import Data");
+            {
+                auto p = open<P>(h, {style("color:var(--text-3);font-size:var(--font-size-sm);margin-bottom:var(--sp-4)")});
+                h.raw("Paste CSV or JSON data below to import into ");
+                el<Code>(h, {}, std::string(sc) + "." + std::string(tb));
+            }
+            auto import_url = "/db/" + std::string(db) + "/schema/" + std::string(sc) + "/table/" + std::string(tb) + "/import/exec";
+            {
+                auto form = open<Form>(h, {hx_post(import_url), hx_target("#import-result"), hx_swap("innerHTML")});
+                {
+                    auto f = open<Div>(h, {style("margin-bottom:var(--sp-3)")});
+                    el<Label>(h, {style("font-weight:600;display:block;margin-bottom:var(--sp-2)")}, "Format");
+                    {
+                        auto sel = open<Select>(h, {name("format"), cls("settings-select")});
+                        el<Option>(h, {value("csv")}, "CSV");
+                        el<Option>(h, {value("json")}, "JSON");
+                        el<Option>(h, {value("sql")}, "SQL (INSERT statements)");
+                    }
+                }
+                {
+                    auto f = open<Div>(h, {style("margin-bottom:var(--sp-3)")});
+                    el<Label>(h, {style("font-weight:600;display:block;margin-bottom:var(--sp-2)")}, "Data");
+                    el<Textarea>(h, {name("data"), cls("cell-modal-textarea"),
+                        style("min-height:200px;width:100%;border:1px solid var(--border);border-radius:var(--radius)"),
+                        placeholder("Paste CSV, JSON array, or SQL INSERT statements here...")});
+                }
+                {
+                    auto f = open<Div>(h, {style("margin-bottom:var(--sp-3)")});
+                    {
+                        auto lbl = open<Label>(h, {style("font-size:var(--font-size-xs);display:flex;gap:4px;align-items:center")});
+                        void_el<Input>(h, {type("checkbox"), name("has_header"), value("1"), checked()});
+                        h.raw(" CSV has header row");
+                    }
+                }
+                el<Button>(h, {type("submit"), cls("btn btn-primary")}, "Import");
+            }
+            el<Div>(h, {id("import-result"), style("margin-top:var(--sp-4)")});
+        }
     };
 
     if (req.is_htmx()) return Response::html(render_partial(render));
@@ -623,19 +672,25 @@ auto SchemaDiffPageHandler::handle(Request& req, AppContext& ctx) -> Response {
     auto schemas = pg::list_schemas(conn->get());
 
     auto render = [&](Html& h) {
-        h.raw("<h3>Schema Comparison</h3>");
-        h.raw("<p style=\"color:var(--text-3);font-size:var(--font-size-sm);margin-bottom:var(--sp-4)\">Compare two schemas to see differences in tables, columns, indexes, and constraints.</p>");
-        h.raw("<form hx-post=\"/schema-diff/exec\" hx-target=\"#diff-result\" hx-swap=\"innerHTML\" style=\"display:flex;gap:var(--sp-3);align-items:center;margin-bottom:var(--sp-4)\">");
-        h.raw("<select name=\"left\" class=\"settings-select\">");
-        if (schemas) for (auto& s : *schemas) h.raw("<option>").text(s.name).raw("</option>");
-        h.raw("</select>");
-        h.raw("<span style=\"color:var(--text-3)\">vs</span>");
-        h.raw("<select name=\"right\" class=\"settings-select\">");
-        if (schemas) for (auto& s : *schemas) h.raw("<option>").text(s.name).raw("</option>");
-        h.raw("</select>");
-        h.raw("<button type=\"submit\" class=\"btn btn-primary\">Compare</button>");
-        h.raw("</form>");
-        h.raw("<div id=\"diff-result\"></div>");
+        using namespace html;
+        el<H3>(h, {}, "Schema Comparison");
+        el<P>(h, {style("color:var(--text-3);font-size:var(--font-size-sm);margin-bottom:var(--sp-4)")},
+            "Compare two schemas to see differences in tables, columns, indexes, and constraints.");
+        {
+            auto form = open<Form>(h, {hx_post("/schema-diff/exec"), hx_target("#diff-result"), hx_swap("innerHTML"),
+                style("display:flex;gap:var(--sp-3);align-items:center;margin-bottom:var(--sp-4)")});
+            {
+                auto sel = open<Select>(h, {name("left"), cls("settings-select")});
+                if (schemas) for (auto& s : *schemas) el<Option>(h, {}, s.name);
+            }
+            el<Span>(h, {style("color:var(--text-3)")}, "vs");
+            {
+                auto sel = open<Select>(h, {name("right"), cls("settings-select")});
+                if (schemas) for (auto& s : *schemas) el<Option>(h, {}, s.name);
+            }
+            el<Button>(h, {type("submit"), cls("btn btn-primary")}, "Compare");
+        }
+        el<Div>(h, {id("diff-result")});
     };
 
     if (req.is_htmx()) return Response::html(render_partial(render));
@@ -672,14 +727,14 @@ auto SchemaDiffExecHandler::handle(Request& req, AppContext& ctx) -> Response {
     for (auto& [name, t] : left_map) {
         if (!right_map.count(name)) {
             Table::row(h, {{escape(name), render_to_string<Badge>(Badge::Props{"ONLY LEFT","danger"}),
-                escape(t->type) + " (" + escape(t->size) + ")", std::string("&mdash;")}});
+                escape(t->type) + " (" + escape(t->size) + ")", markup::mdash()}});
         }
     }
     // Tables only in right
     for (auto& [name, t] : right_map) {
         if (!left_map.count(name)) {
             Table::row(h, {{escape(name), render_to_string<Badge>(Badge::Props{"ONLY RIGHT","success"}),
-                std::string("&mdash;"), escape(t->type) + " (" + escape(t->size) + ")"}});
+                markup::mdash(), escape(t->type) + " (" + escape(t->size) + ")"}});
         }
     }
     // Tables in both — compare columns
@@ -717,7 +772,7 @@ auto ExactCountHandler::handle(Request& req, AppContext& ctx) -> Response {
     if (!conn) return Response::html("?");
     auto count = pg::table_row_count(conn->get(), sc, tb);
     if (!count) return Response::html("?");
-    return Response::html(std::format("<strong>{}</strong> rows (exact)", *count));
+    return Response::html(markup::strong(std::to_string(*count)) + " rows (exact)");
 }
 
 } // namespace getgresql::api
