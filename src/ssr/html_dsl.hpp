@@ -47,7 +47,7 @@ namespace getgresql::ssr::html {
 // Key is trusted (compile-time string literal), value is escaped on render.
 
 struct Attr {
-    std::string_view key;
+    std::string key;
     std::string value;
 };
 
