@@ -611,9 +611,11 @@ h3 {
 }
 
 h4 {
-    font-size: var(--font-size-base);
-    font-weight: 600;
-    color: var(--accent);
+    font-size: var(--font-size-sm);
+    font-weight: 700;
+    color: var(--text-2);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
     padding-bottom: var(--sp-2);
     border-bottom: 1px solid var(--border-subtle);
     margin-bottom: var(--sp-3);

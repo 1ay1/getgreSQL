@@ -103,16 +103,14 @@ auto SettingsHandler::handle(Request& req, AppContext& /*ctx*/) -> Response {
     auto h = Html::with_capacity(4096);
     {
         auto toolbar = open<Div>(h, {cls("settings-toolbar")});
-        {
-            auto box = open<Div>(h, {cls("search-box"), style("flex:1")});
-            void_el<Input>(h, {type("search"), name("q"), placeholder("Search settings..."),
-                cls("search-input"), aria_label("Search settings"),
-                hx_get("/settings/search"), hx_trigger("input changed delay:300ms"),
-                hx_target("#settings-results")});
-        }
+        void_el<Input>(h, {type("search"), name("q"), placeholder("Search settings..."),
+            cls("search-input"), aria_label("Search settings"),
+            hx_get("/settings/search"), hx_trigger("input changed delay:300ms"),
+            hx_target("#settings-results")});
         el_raw<Button>(h, {cls("btn btn-sm btn-warning"),
             hx_post("/settings/reload"), hx_target("#reload-status"), hx_swap("innerHTML"),
-            hx_confirm("Reload PostgreSQL configuration?")}, "&#8635; Reload Config");
+            hx_confirm("Reload PostgreSQL configuration?")},
+            std::string(icon::reload) + " Reload Config");
         el<Span>(h, {id("reload-status")});
     }
     {

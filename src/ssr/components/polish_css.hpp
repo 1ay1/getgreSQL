@@ -279,6 +279,33 @@ td.row-num:hover { color: var(--accent); background: var(--accent-subtle); }
     gap: var(--sp-3);
 }
 
+/* ─── Settings toolbar ────────────────────────────────────────────────── */
+.settings-toolbar {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    margin-bottom: var(--sp-4);
+    flex-wrap: wrap;
+}
+.settings-toolbar .search-input {
+    flex: 1;
+    min-width: 200px;
+    padding: var(--sp-2) var(--sp-3);
+    background: var(--bg-1);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius);
+    color: var(--text-1);
+    font-size: var(--font-size-sm);
+    font-family: var(--font-sans);
+    outline: none;
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+.settings-toolbar .search-input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent-subtle);
+}
+.settings-toolbar .search-input::placeholder { color: var(--text-4); }
+
 /* ─── Admin page wrapper ─────────────────────────────────────────────── */
 .admin-wrap {
     max-width: 100%;
